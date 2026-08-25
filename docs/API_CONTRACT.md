@@ -41,11 +41,10 @@ Response:
   "id": 1,
   "name": "Backend Team",
   "timezone": "Asia/Kolkata",
-  "deadline": "10:00",
-  "webhookUrl": "https://example.com/webhook"
+  "deadline": "10:00"
 }
 
-Note: `slackBotToken` is write-only — it must never be echoed back in responses. Omit it entirely from response DTOs.
+Note: `slackBotToken` and `webhookUrl` are write-only — neither must ever be echoed back in any response, including this one. Omit both entirely from response DTOs. (An earlier version of this example incorrectly included `webhookUrl` in the response — this was a documentation bug, not an intended exception. See SECURITY.md §2.4.)
 
 ---
 
@@ -127,6 +126,8 @@ DELETE /api/teams/{teamId}/members/{memberId}
 ## Submit Standup
 
 POST /api/teams/{teamId}/standups
+
+`standupDate` is never accepted in the request — it is always derived server-side from the team's local calendar date at submission time (see ARCHITECTURE.md §12a). This is intentional, not an omission; do not add a `standupDate` field to the request DTO.
 
 Request:
 

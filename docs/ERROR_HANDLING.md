@@ -82,7 +82,7 @@ Every unmapped exception must still be caught by a catch-all handler and returne
 
 ### 5.2 Standup (Person 2)
 
-- Duplicate standup submission for the same member/team/day → `DuplicateSubmissionException` (409), not a silent overwrite, unless editing is explicitly supported (see DATABASE_SCHEMA.md §9).
+- Duplicate standup submission for the same member/team/day → the database `UNIQUE(team_id, member_id, standup_date)` constraint (DATABASE_SCHEMA.md §5) rejects the insert; the service layer catches the resulting `DataIntegrityViolationException` and re-throws as `DuplicateSubmissionException` (409). Do not rely on an application-layer "check then insert" alone — see DATABASE_SCHEMA.md §5 for the race-condition rationale.
 - Standup submitted for a `memberId` not belonging to the `teamId` in the URL → `TeamMemberMismatchException` (400).
 - Empty `yesterday`/`today` fields → `ValidationException` (400); `blockers` remains optional and may be empty.
 

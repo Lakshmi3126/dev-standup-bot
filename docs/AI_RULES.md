@@ -14,6 +14,10 @@ Before making code changes, AI must be given context from:
 - ARCHITECTURE.md
 - DATABASE_SCHEMA.md
 - API_CONTRACT.md
+- SECURITY.md
+- ERROR_HANDLING.md
+- TESTING_STRATEGY.md
+- DEPLOYMENT.md
 - TEAM_TASKS.md
 
 Do not implement features based only on a short prompt.

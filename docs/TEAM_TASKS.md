@@ -200,7 +200,9 @@ These tasks must be done together.
 - [ ] Set up Spring Boot
 - [ ] Set up Maven
 - [ ] Set up PostgreSQL
-- [ ] Configure environment variables (including Slack bot token, webhook URL)
+- [ ] Configure database credentials through environment variables
+- [ ] Configure application environment variables (port, active profile, etc.)
+- [ ] Configure Slack credentials securely according to SECURITY.md — these are per-team values entered through the Team API and stored in the database, NOT global environment variables (see DEPLOYMENT.md §3)
 - [ ] Create initial project structure
 - [ ] Create docs folder
 

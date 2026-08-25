@@ -196,6 +196,35 @@ DigestService
   ↓
 NotificationService
 
+### 9a. Scheduler Implementation Decision (v1)
+
+Do not create a separate dynamically-scheduled job per team (e.g., one `@Scheduled` task registered per team's deadline). This is decided explicitly to avoid four different implementations emerging from four different people's Cursor sessions.
+
+Instead, use a single fixed-interval poller:
+
+```
+Spring Scheduler
+runs every 1 minute
+        ↓
+Get all active teams
+        ↓
+For each team:
+    calculate current time in team's timezone
+        ↓
+    Is it exactly 10 minutes before deadline (within the 1-minute tick window)?
+        → trigger reminder pass for this team
+        ↓
+    Is it exactly deadline time (within the 1-minute tick window)?
+        → trigger deadline-processing pass for this team
+```
+
+Rationale:
+
+- One job, one schedule, no dynamic task registration/deregistration when teams are created, updated, or deleted.
+- Per-team timezone math happens inside the loop, not in the scheduling mechanism itself — simpler to test (inject a fixed clock, iterate teams, assert which ones trigger).
+- A 1-minute tick granularity is sufficient for a "10 minutes before" / "at deadline" check; sub-minute precision is not required by the spec.
+- Wrap each team's processing in its own try/catch so one team's failure doesn't block others in the same tick (see ERROR_HANDLING.md §5.3).
+
 ---
 
 ## 10. Notification Architecture
@@ -276,6 +305,18 @@ ZonedDateTime
 LocalDate
 LocalTime
 
+### 12a. Working Day Definition (v1)
+
+`standup_date` is always derived server-side from the team's current local calendar date at the moment of submission — the client never supplies it directly.
+
+```
+standup_date = LocalDate.now(team's ZoneId) at time of the POST request
+```
+
+This removes ambiguity around late-night submissions (e.g., 11:59 PM vs. 12:01 AM in the team's timezone) and prevents a client from claiming a submission belongs to a different day than it actually occurred in. It also means "late" is always evaluated against *that same day's* deadline — a standup submitted at 8:00 AM Tuesday is a Tuesday standup, evaluated against Tuesday's deadline, never retroactively attached to Monday.
+
+See API_CONTRACT.md §4 (Submit Standup) — the request body does not include `standupDate`; it is computed and returned in the response.
+
 ---
 
 ## 13. Digest Generation
@@ -329,13 +370,16 @@ Find today's standups
   ↓
 Find missing members
   ↓
-DigestService
+Create/find DigestLog row, status = PENDING   ← written BEFORE the Slack call, not after
   ↓
-NotificationService
+DigestService generates digest
   ↓
-Slack
+NotificationService sends to Slack
   ↓
-Write DigestLog (initial_sent_at)
+  ├─ Success → update DigestLog: status = SENT, initial_sent_at = now
+  └─ Failure → update DigestLog: status = FAILED (retry per ERROR_HANDLING.md §5.4)
+
+**Why the DigestLog row is written before the Slack call, not after:** if the Slack call succeeds but the subsequent database write fails, a "write-after-send" ordering leaves no record that the digest went out — the next scheduler tick could send it again. Writing a `PENDING` row first means even a mid-flight crash leaves evidence that this team/day was being processed, and the status update after the Slack call is a much smaller, more reliable operation than the full digest-generation-plus-send sequence.
 
 ---
 
@@ -368,8 +412,9 @@ StandupService marks LATE
 Check DigestLog for (team_id, today)
   ↓
   ├─ No row found → do nothing yet (deadline job hasn't run)
-  ├─ Row found, no prior update → generate updated digest, send, increment update_count, set last_updated_at
-  └─ Row found, prior update exists → same as above (repeat sends are allowed, but see 16b for debouncing)
+  ├─ Row found, status = PENDING → do not send yet; the initial send is still in flight or about to run. Let the deadline job's own PENDING→SENT/FAILED transition finish first (avoid a race between the deadline job and a late-submission handler both trying to send at once)
+  ├─ Row found, status = FAILED → treat as if no digest has been sent yet; generate and send, then transition FAILED → SENT
+  └─ Row found, status = SENT → generate updated digest, send, increment update_count, set last_updated_at (repeat sends are allowed, but see §16b for debouncing)
 
 ### 16b. Debounce Recommendation
 

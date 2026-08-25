@@ -109,6 +109,14 @@ One Member
   ↓
 Many Standups
 
+### Constraint
+
+```sql
+UNIQUE(team_id, member_id, standup_date)
+```
+
+This is enforced at the database level, not just in service-layer validation. Relying only on an application-layer "check then insert" is a race condition: two near-simultaneous requests can both pass the check before either has inserted, resulting in two rows for the same member/day. The unique constraint makes this impossible regardless of request timing, and the service layer catches the resulting constraint-violation exception and maps it to `DuplicateSubmissionException` → 409 (see ERROR_HANDLING.md §3, §5.2).
+
 ---
 
 # 6. BLOCKER
@@ -145,12 +153,23 @@ Tracks whether a digest has already been sent for a given team/day, so late subm
 | id | BIGINT | Primary key |
 | team_id | BIGINT | Foreign key to team |
 | digest_date | DATE | The working day this digest covers |
-| initial_sent_at | TIMESTAMP | When the first digest was sent |
+| status | VARCHAR | PENDING / SENT / FAILED (see §7a) |
+| initial_sent_at | TIMESTAMP | When the first digest was successfully sent (nullable until status = SENT) |
 | last_updated_at | TIMESTAMP | When the digest was last resent (nullable until first update) |
 | update_count | INTEGER | Number of times the digest has been resent due to late submissions |
 | slack_message_ts | VARCHAR | Slack message timestamp/ID of the sent digest, if using an API that supports editing messages in place instead of resending |
 
 Constraint: one row per (team_id, digest_date).
+
+### 7a. Status Lifecycle
+
+```
+PENDING → SENT      (Slack call succeeded)
+PENDING → FAILED    (Slack call failed after retries)
+FAILED  → SENT      (a later retry or resend succeeds)
+```
+
+The row is created in `PENDING` status *before* the Slack call is attempted, not after. This ensures that even if the application crashes between the Slack call and updating the row, the next scheduler run sees a `PENDING`/`FAILED` row rather than no row at all, and knows the digest state needs to be resolved rather than blindly resending or blindly skipping. See ARCHITECTURE.md §15 and §16a for the full sequencing.
 
 **Why:** Without this, the scheduler can't distinguish "first digest for today" from "resend after late submission," risking either duplicate initial sends or a late submission that never triggers an update. See ARCHITECTURE.md §16a for the decision logic that uses this table.
 
@@ -205,9 +224,9 @@ The member must belong to the specified team.
 
 ## Duplicate Standup
 
-A member should normally have only one standup per team per working day.
+A member has only one standup per team per working day, enforced by the `UNIQUE(team_id, member_id, standup_date)` constraint (see §5).
 
-If editing is supported, update the existing standup instead of creating another one.
+If editing is supported, update the existing standup instead of creating another one. A second POST for the same day must fail with 409 (via the constraint violation), not silently succeed or overwrite.
 
 ## Digest Log
 

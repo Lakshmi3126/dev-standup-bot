@@ -1,0 +1,6 @@
+# Local development only. DEPLOYMENT.md allows Hibernate ddl-auto=update here.
+# Production must use versioned migrations, not ddl-auto.
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: update

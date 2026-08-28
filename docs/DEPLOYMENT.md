@@ -57,7 +57,9 @@ Note: `slack_bot_token` and `webhook_url` are **not** global environment variabl
 
 ## 4. Database Migrations
 
-- Use a migration tool (e.g., Flyway or Liquibase) rather than relying on Hibernate `ddl-auto` in production. `ddl-auto=update` is acceptable for local development only.
+- Use Flyway for all database migrations.
+- Do not use Hibernate `ddl-auto` for production schema management.
+- Every schema change must have a versioned Flyway migration checked into the repository.
 - Every schema change discussed in DATABASE_SCHEMA.md must correspond to a versioned migration script, checked into the repo.
 - Migrations run automatically on application startup in all environments, or as an explicit pre-deploy step — decide and document which, before the first production deploy (open decision, see §7).
 

@@ -75,6 +75,30 @@ Request:
 
 ---
 
+### Team API Decisions
+
+- `deadline` is required when creating a team.
+- `webhookUrl` is required when creating a team.
+- `slackBotToken` is required when creating a team.
+- `slackBotToken` is accepted during team creation only and cannot be updated through PUT.
+- Team responses contain only:
+  - `id`
+  - `name`
+  - `timezone`
+  - `deadline`
+- `webhookUrl` and `slackBotToken` must never appear in team responses.
+- `slack_workspace_id` is stored internally but is not exposed through the API.
+
+### Member API Decisions
+
+- `slackUserId` is optional.
+- Member responses contain:
+  - `id`
+  - `teamId`
+  - `name`
+  - `email`
+  - `slackUserId`
+    
 ## Delete Team
 
 DELETE /api/teams/{teamId}

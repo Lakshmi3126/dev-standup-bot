@@ -18,6 +18,162 @@ Notifications & Blocker Management
 
 ---
 
+# SHARED CONTRACTS & CROSS-CUTTING RESPONSIBILITIES
+
+These items affect multiple modules. They are not owned exclusively by one feature module, but one person is assigned as the primary driver to ensure the shared piece is implemented consistently.
+
+## 1. DigestLog — Primary Driver: PERSON 3
+
+Person 3 owns:
+
+- [ ] DigestLog entity
+- [ ] DigestLog repository
+- [ ] DigestLog status model
+- [ ] PENDING state
+- [ ] SENT state
+- [ ] FAILED state
+- [ ] Initial digest record creation
+- [ ] Digest delivery tracking
+
+Person 4 consumes this contract when implementing Slack delivery.
+
+### Agreed interaction
+
+Person 3 provides the notification layer with the digest record.
+
+Conceptually:
+
+    DigestLog
+        ↓
+    NotificationService
+        ↓
+    Slack
+        ↓
+    success → markSent()
+    failure → markFailed()
+
+The exact service/repository method signatures must be agreed before Person 3 and Person 4 implement their modules independently.
+
+---
+
+## 2. Global Exception Handling — Primary Driver: PERSON 1
+
+Person 1 owns the initial global exception-handling infrastructure.
+
+Responsibilities:
+
+- [ ] Create @RestControllerAdvice
+- [ ] Implement global exception handler
+- [ ] Implement standard error response
+- [ ] Implement agreed exception/status mappings
+- [ ] Create base/custom exception structure defined in ERROR_HANDLING.md
+
+Other contributors must use the shared exception-handling mechanism.
+
+They should NOT create separate global exception handlers.
+
+---
+
+## 3. Secure Slack Credential Handling — Primary Driver: PERSON 1
+
+Person 1 owns the secure representation of team Slack credentials inside the Team entity and API layer.
+
+Responsibilities:
+
+- [ ] Store webhook URL/token according to DATABASE_SCHEMA.md
+- [ ] Ensure sensitive fields are not returned in API responses
+- [ ] Use DTOs that exclude sensitive fields from responses
+- [ ] Ensure sensitive fields are not accidentally serialized
+- [ ] Ensure credentials are not logged
+
+Person 4 consumes these credentials through the appropriate service without exposing them through APIs or logs.
+
+Person 4 must not create alternative credential storage.
+
+---
+
+## 4. Working-Day Derivation — Primary Driver: PERSON 2
+
+Person 2 owns the logic for determining the standup working date.
+
+Responsibilities:
+
+- [ ] Derive standup_date according to ARCHITECTURE.md
+- [ ] Use the team's timezone
+- [ ] Apply the defined working-day rules
+- [ ] Ensure late submissions are associated with the correct standup day
+- [ ] Test date-boundary cases
+
+Person 3 must use this existing logic rather than creating a second working-day calculation.
+
+---
+
+## 5. Digest Debounce — Primary Driver: PERSON 3
+
+Person 3 owns the debounce behavior for late-submission digest updates.
+
+Responsibilities:
+
+- [ ] Implement the configured debounce window
+- [ ] Prevent multiple late submissions from generating unnecessary Slack messages
+- [ ] Ensure the final updated digest contains all late submissions received within the debounce window
+- [ ] Coordinate with NotificationService
+
+Person 4 is responsible for sending the resulting notification, not implementing a separate debounce mechanism.
+
+---
+
+## Initial Project Infrastructure
+
+Although these are shared team responsibilities, the following drivers will coordinate the initial setup.
+
+### Database Migrations — Driver: PERSON 1
+
+- [ ] Set up database migration tool
+- [ ] Create initial migration
+- [ ] Verify schema matches DATABASE_SCHEMA.md
+- [ ] Document migration process
+
+All contributors must use migrations for schema changes.
+
+### Docker / Docker Compose — Driver: PERSON 3
+
+- [ ] Create Dockerfile
+- [ ] Create docker-compose configuration
+- [ ] Configure application container
+- [ ] Configure PostgreSQL container
+- [ ] Verify application can run through Docker
+
+All contributors should test their modules in the shared Docker environment.
+
+### Testcontainers — Driver: PERSON 2
+
+- [ ] Configure Testcontainers
+- [ ] Configure PostgreSQL test container
+- [ ] Document integration-test setup
+- [ ] Provide shared test configuration
+
+All contributors should use the shared integration-test setup.
+
+---
+
+## Shared Contract Rule
+
+Before Person 3 and Person 4 begin implementing the scheduler, digest, and notification integration, the team must agree on:
+
+- DigestLog schema
+- DigestLog status values
+- DigestLog service interaction
+- NotificationService contract
+- Working-day calculation
+- Debounce behavior
+
+These decisions must be documented before implementation.
+
+No contributor should independently create a competing implementation of a shared contract.
+
+---
+
 # PERSON 1 — TEAM & MEMBER MANAGEMENT
 
 ## Responsibilities
@@ -56,6 +212,19 @@ Notifications & Blocker Management
 - [ ] Controller tests
 - [ ] Validation tests
 - [ ] Test that bot token / webhook URL never leak into response DTOs
+
+### Agreed Team Decisions
+
+- `deadline` is required during team creation.
+- `webhookUrl` is required during team creation.
+- `slackBotToken` is required during team creation.
+- `slackBotToken` cannot be updated through PUT.
+- Team deletion returns 409 if members exist.
+- Team deletion does not cascade to members.
+- `slack_workspace_id` is stored internally but not exposed through API responses.
+- Team responses never expose Slack secrets.
+- `slackUserId` is optional for members.
+- Members without `slackUserId` are skipped/logged for personal reminders.
 
 ---
 

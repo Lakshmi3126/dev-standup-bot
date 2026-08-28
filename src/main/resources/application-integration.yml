@@ -1,0 +1,5 @@
+# Shared integration environment. Use versioned migrations once they exist; ddl-auto=update is for early setup only.
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: update

@@ -18,4 +18,14 @@ public interface MemberRepository extends JpaRepository<Member, Long> {
 
     // Check whether a team has at least one member.
     boolean existsByTeamId(Long teamId);
+
+    // Check whether an email is already used by a member of the team.
+    boolean existsByTeamIdAndEmail(Long teamId, String email);
+
+    // Check whether an email is used by another member of the same team.
+    boolean existsByTeamIdAndEmailAndIdNot(
+            Long teamId,
+            String email,
+            Long memberId
+    );
 }

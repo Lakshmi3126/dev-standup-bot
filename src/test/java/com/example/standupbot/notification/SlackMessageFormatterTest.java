@@ -1,4 +1,4 @@
-git statuspackage com.example.standupbot.notification;
+package com.example.standupbot.notification;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;

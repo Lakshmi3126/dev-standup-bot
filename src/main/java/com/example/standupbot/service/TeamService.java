@@ -9,6 +9,7 @@ import com.example.standupbot.exception.InvalidTimezoneException;
 import com.example.standupbot.exception.ResourceNotFoundException;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.repository.TeamRepository;
+import com.example.standupbot.scheduler.StandupScheduler;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -20,13 +21,16 @@ public class TeamService {
 
     private final TeamRepository teamRepository;
     private final MemberRepository memberRepository;
+    private final StandupScheduler standupScheduler;
 
     public TeamService(
             TeamRepository teamRepository,
-            MemberRepository memberRepository
+            MemberRepository memberRepository,
+            StandupScheduler standupScheduler
     ) {
         this.teamRepository = teamRepository;
         this.memberRepository = memberRepository;
+        this.standupScheduler = standupScheduler;
     }
 
     // =========================
@@ -54,6 +58,8 @@ public class TeamService {
         team.setUpdatedAt(now);
 
         Team savedTeam = teamRepository.save(team);
+
+        standupScheduler.scheduleTeamDeadline(savedTeam);
 
         return toResponse(savedTeam);
     }
@@ -122,6 +128,8 @@ public class TeamService {
 
         Team updatedTeam = teamRepository.save(team);
 
+        standupScheduler.scheduleTeamDeadline(updatedTeam);
+
         return toResponse(updatedTeam);
     }
 
@@ -150,6 +158,8 @@ public class TeamService {
                     "Cannot delete team with existing members"
             );
         }
+
+        standupScheduler.cancelTeamDeadline(teamId);
 
         teamRepository.delete(team);
     }

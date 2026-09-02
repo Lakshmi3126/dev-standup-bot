@@ -9,6 +9,7 @@ import com.example.standupbot.exception.ConflictException;
 import com.example.standupbot.exception.ResourceNotFoundException;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.repository.TeamRepository;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,7 +38,9 @@ class MemberServiceTest {
 
     @BeforeEach
     void setUp() {
+
         team = new Team();
+
         team.setId(1L);
         team.setName("Development Team");
         team.setTimezone("Asia/Kolkata");
@@ -45,25 +48,34 @@ class MemberServiceTest {
 
     @Test
     void createsMemberSuccessfully() {
+
         CreateMemberRequest request = new CreateMemberRequest();
+
         request.setName("Keerthi");
         request.setEmail("keerthi@example.com");
         request.setSlackUserId("U12345");
 
-        when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
-        when(memberRepository.existsByTeamIdAndEmail(1L, "keerthi@example.com"))
-                .thenReturn(false);
+        when(teamRepository.findById(1L))
+                .thenReturn(Optional.of(team));
+
+        when(memberRepository.existsByTeamIdAndEmail(
+                1L,
+                "keerthi@example.com"
+        )).thenReturn(false);
 
         Member savedMember = new Member();
+
         savedMember.setId(10L);
         savedMember.setTeam(team);
         savedMember.setName("Keerthi");
         savedMember.setEmail("keerthi@example.com");
         savedMember.setSlackUserId("U12345");
 
-        when(memberRepository.save(any(Member.class))).thenReturn(savedMember);
+        when(memberRepository.save(any(Member.class)))
+                .thenReturn(savedMember);
 
-        MemberResponse response = memberService.createMember(1L, request);
+        MemberResponse response =
+                memberService.createMember(1L, request);
 
         assertEquals(10L, response.getId());
         assertEquals(1L, response.getTeamId());
@@ -76,46 +88,60 @@ class MemberServiceTest {
 
     @Test
     void rejectsDuplicateMemberEmail() {
+
         CreateMemberRequest request = new CreateMemberRequest();
+
         request.setName("Another User");
         request.setEmail("keerthi@example.com");
 
-        when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
-        when(memberRepository.existsByTeamIdAndEmail(1L, "keerthi@example.com"))
-                .thenReturn(true);
+        when(teamRepository.findById(1L))
+                .thenReturn(Optional.of(team));
+
+        when(memberRepository.existsByTeamIdAndEmail(
+                1L,
+                "keerthi@example.com"
+        )).thenReturn(true);
 
         assertThrows(
                 ConflictException.class,
                 () -> memberService.createMember(1L, request)
         );
 
-        verify(memberRepository, never()).save(any(Member.class));
+        verify(memberRepository, never())
+                .save(any(Member.class));
     }
 
     @Test
     void rejectsMemberWhenTeamDoesNotExist() {
+
         CreateMemberRequest request = new CreateMemberRequest();
+
         request.setName("Keerthi");
         request.setEmail("keerthi@example.com");
 
-        when(teamRepository.findById(1L)).thenReturn(Optional.empty());
+        when(teamRepository.findById(1L))
+                .thenReturn(Optional.empty());
 
         assertThrows(
                 ResourceNotFoundException.class,
                 () -> memberService.createMember(1L, request)
         );
 
-        verify(memberRepository, never()).save(any(Member.class));
+        verify(memberRepository, never())
+                .save(any(Member.class));
     }
 
     @Test
     void updatesMemberSuccessfully() {
+
         UpdateMemberRequest request = new UpdateMemberRequest();
+
         request.setName("Updated Keerthi");
         request.setEmail("updated@example.com");
         request.setSlackUserId("U99999");
 
         Member existingMember = new Member();
+
         existingMember.setId(10L);
         existingMember.setTeam(team);
         existingMember.setName("Keerthi");
@@ -137,21 +163,36 @@ class MemberServiceTest {
         MemberResponse response =
                 memberService.updateMember(1L, 10L, request);
 
-        assertEquals("Updated Keerthi", response.getName());
-        assertEquals("updated@example.com", response.getEmail());
-        assertEquals("U99999", response.getSlackUserId());
+        assertEquals(
+                "Updated Keerthi",
+                response.getName()
+        );
 
-        verify(memberRepository).save(existingMember);
+        assertEquals(
+                "updated@example.com",
+                response.getEmail()
+        );
+
+        assertEquals(
+                "U99999",
+                response.getSlackUserId()
+        );
+
+        verify(memberRepository)
+                .save(existingMember);
     }
 
     @Test
     void rejectsDuplicateEmailDuringUpdate() {
+
         UpdateMemberRequest request = new UpdateMemberRequest();
+
         request.setName("Updated Keerthi");
         request.setEmail("existing@example.com");
         request.setSlackUserId("U99999");
 
         Member existingMember = new Member();
+
         existingMember.setId(10L);
         existingMember.setTeam(team);
 
@@ -169,6 +210,34 @@ class MemberServiceTest {
                 () -> memberService.updateMember(1L, 10L, request)
         );
 
-        verify(memberRepository, never()).save(any(Member.class));
+        verify(memberRepository, never())
+                .save(any(Member.class));
+    }
+
+    // ---------------------------------------------------------
+    // TEST 6: MEMBER FROM WRONG TEAM
+    // ---------------------------------------------------------
+
+    @Test
+    void rejectsMemberFromWrongTeam() {
+
+        Long teamId = 1L;
+        Long memberId = 10L;
+
+        when(memberRepository.findByIdAndTeamId(
+                memberId,
+                teamId
+        )).thenReturn(Optional.empty());
+
+        assertThrows(
+                ResourceNotFoundException.class,
+                () -> memberService.getMemberById(
+                        teamId,
+                        memberId
+                )
+        );
+
+        verify(memberRepository)
+                .findByIdAndTeamId(memberId, teamId);
     }
 }

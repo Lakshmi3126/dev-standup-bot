@@ -1,10 +1,29 @@
 package com.example.standupbot.notification;
 
-public interface NotificationService {
+import org.springframework.stereotype.Service;
 
-    void sendPersonalReminder(ReminderContent reminder);
+@Service
+public class NotificationService {
 
-    void sendBlockerAlert(BlockerAlertContent alert);
+    private final WebhookNotificationService webhookNotificationService;
+    private final BotNotificationService botNotificationService;
 
-    void sendUnresolvedBlockerAlert(BlockerAlertContent alert);
+    public NotificationService(
+            WebhookNotificationService webhookNotificationService,
+            BotNotificationService botNotificationService) {
+        this.webhookNotificationService = webhookNotificationService;
+        this.botNotificationService = botNotificationService;
+    }
+
+    public void sendChannelMessage(String webhookUrl, String message) {
+        webhookNotificationService.send(webhookUrl, message);
+    }
+
+    public void sendPersonalMessage(
+            String botToken,
+            String slackUserId,
+            String message) {
+
+        botNotificationService.send(botToken, slackUserId, message);
+    }
 }

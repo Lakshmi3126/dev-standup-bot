@@ -1,19 +1,22 @@
 package com.example.standupbot.scheduler;
 
+import com.example.standupbot.entity.Member;
+import com.example.standupbot.entity.Standup;
 import com.example.standupbot.entity.Team;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.repository.StandupRepository;
 import com.example.standupbot.repository.TeamRepository;
 import jakarta.annotation.PostConstruct;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
+import java.util.stream.Collectors;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
 
@@ -33,10 +36,11 @@ public class StandupScheduler {
             TaskScheduler taskScheduler,
             StandupRepository standupRepository,
             MemberRepository memberRepository) {
+
         this.teamRepository = teamRepository;
         this.taskScheduler = taskScheduler;
-        this.standupRepository=standupRepository;
-        this.memberRepository=memberRepository;
+        this.standupRepository = standupRepository;
+        this.memberRepository = memberRepository;
     }
 
     @PostConstruct
@@ -65,6 +69,10 @@ public class StandupScheduler {
             nextDeadline = nextDeadline.plusDays(1);
         }
 
+        // Reminder should happen 10 minutes before the deadline.
+        ZonedDateTime reminderTime =
+                nextDeadline.minusMinutes(10);
+
         ScheduledFuture<?> existingTask =
                 scheduledTasks.get(team.getId());
 
@@ -74,13 +82,13 @@ public class StandupScheduler {
 
         ScheduledFuture<?> future =
                 taskScheduler.schedule(
-                        () -> processDeadline(team.getId()),
-                        nextDeadline.toInstant());
+                        () -> processReminder(team.getId()),
+                        reminderTime.toInstant());
 
         scheduledTasks.put(team.getId(), future);
     }
 
-    public void processDeadline(Long teamId) {
+    public void processReminder(Long teamId) {
 
         Team team = teamRepository.findById(teamId)
                 .orElse(null);
@@ -92,41 +100,37 @@ public class StandupScheduler {
 
         ZoneId zoneId = ZoneId.of(team.getTimezone());
 
-        ZonedDateTime deadline =
-                ZonedDateTime.now(zoneId)
-                        .with(team.getDeadline());
+        ZonedDateTime now =
+                ZonedDateTime.now(zoneId);
 
-        LocalDate today = deadline.toLocalDate();
+        LocalDate today = now.toLocalDate();
 
-        List<com.example.standupbot.entity.Member> members =
+        List<Member> members =
                 memberRepository.findByTeamId(teamId);
 
-        List<com.example.standupbot.entity.Standup> standups =
+        List<Standup> standups =
                 standupRepository
                         .findByTeamIdAndStandupDateOrderByStandupDateAsc(
                                 teamId,
                                 today);
 
-        java.util.Set<Long> submittedMemberIds =
+        Set<Long> submittedMemberIds =
                 standups.stream()
                         .filter(standup ->
-                                standup.getSubmittedAt() != null
-                                        && !standup.getSubmittedAt()
-                                        .isAfter(deadline.toInstant()))
-                        .map(com.example.standupbot.entity.Standup::getMemberId)
-                        .collect(java.util.stream.Collectors.toSet());
+                                standup.getSubmittedAt() != null)
+                        .map(Standup::getMemberId)
+                        .collect(Collectors.toSet());
 
-        List<com.example.standupbot.entity.Member> missedMembers =
+        List<Member> pendingMembers =
                 members.stream()
                         .filter(member ->
                                 !submittedMemberIds.contains(member.getId()))
                         .toList();
 
-        // missedMembers contains members who did not submit
-        // their standup by the team's deadline.
 
         scheduleTeamDeadline(team);
     }
+
     public void cancelTeamDeadline(Long teamId) {
 
         ScheduledFuture<?> existingTask =

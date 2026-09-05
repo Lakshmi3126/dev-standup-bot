@@ -24,4 +24,9 @@ public interface StandupRepository extends JpaRepository<Standup, Long> {
     List<Standup> findByTeamIdAndStandupDateOrderByStandupDateAsc(
             Long teamId,
             LocalDate standupDate);
+
+    Standup findTopByTeamIdAndMemberIdAndStandupDateLessThanOrderByStandupDateDesc(
+            Long teamId,
+            Long memberId,
+            LocalDate standupDate);
 }

@@ -1,5 +1,5 @@
 package com.example.standupbot.service;
-
+import com.example.standupbot.scheduler.StandupScheduler;
 import com.example.standupbot.dto.CreateTeamRequest;
 import com.example.standupbot.dto.TeamResponse;
 import com.example.standupbot.entity.Team;
@@ -28,7 +28,13 @@ class TeamServiceTest {
     private TeamRepository teamRepository;
 
     @Mock
+    private BlockerService blockerService;
+
+    @Mock
     private MemberRepository memberRepository;
+
+    @Mock
+    private StandupScheduler standupScheduler;
 
     @InjectMocks
     private TeamService teamService;

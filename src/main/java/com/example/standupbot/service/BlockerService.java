@@ -7,6 +7,9 @@ import com.example.standupbot.repository.StandupRepository;
 import org.springframework.stereotype.Service;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.dto.BlockerResponse;
+import com.example.standupbot.notification.NotificationService;
+import com.example.standupbot.notification.SlackMessageFormatter;
+import com.example.standupbot.notification.BlockerAlertContent;
 import java.time.Clock;
 import com.example.standupbot.entity.Member;
 import java.util.ArrayList;
@@ -17,17 +20,23 @@ public class BlockerService {
     private final BlockerRepository blockerRepository;
     private final StandupRepository standupRepository;
     private final MemberRepository memberRepository;
+    private final NotificationService notificationService;
+    private final SlackMessageFormatter slackMessageFormatter;
     private final Clock clock;
 
     public BlockerService(
             BlockerRepository blockerRepository,
             StandupRepository standupRepository,
             MemberRepository memberRepository,
+            NotificationService notificationService,
+            SlackMessageFormatter slackMessageFormatter,
             Clock clock) {
 
         this.blockerRepository = blockerRepository;
         this.standupRepository = standupRepository;
         this.memberRepository = memberRepository;
+        this.notificationService = notificationService;
+        this.slackMessageFormatter = slackMessageFormatter;
         this.clock = clock;
     }
 
@@ -76,14 +85,38 @@ public class BlockerService {
             blocker.setStatus(Blocker.Status.ACTIVE);
 
             blockerRepository.save(blocker);
+
+             Member member = memberRepository
+                .findByIdAndTeamId(
+                        standup.getMemberId(),
+                        standup.getTeamId())
+                .orElse(null);
+
+            if (member != null && member.getTeam() != null) {
+                BlockerAlertContent content = new BlockerAlertContent(
+                member.getTeam().getName(),
+                member.getName(),
+                currentBlocker,
+                1
+                );
+
+                String message = slackMessageFormatter.formatBlockerAlert(content);
+
+                notificationService.sendChannelMessage(
+                        member.getTeam().getWebhookUrl(),
+                        message
+                );
+            }
             return;
         }
 
         if (sameAsPrevious && consecutiveDay) {
+
             blocker.setStandupId(standup.getId());
             blocker.setDescription(currentBlocker);
             blocker.setLastReportedAt(standup.getSubmittedAt());
             blocker.setConsecutiveDays(blocker.getConsecutiveDays() + 1);
+
             if (blocker.getConsecutiveDays() >= 3) {
                 blocker.setStatus(Blocker.Status.UNRESOLVED);
             } else {
@@ -91,6 +124,34 @@ public class BlockerService {
             }
 
             blockerRepository.save(blocker);
+
+            if (blocker.getConsecutiveDays() == 3) {
+
+                Member member = memberRepository
+                        .findByIdAndTeamId(
+                                standup.getMemberId(),
+                                standup.getTeamId())
+                        .orElse(null);
+
+                if (member != null && member.getTeam() != null) {
+
+                    BlockerAlertContent content = new BlockerAlertContent(
+                            member.getTeam().getName(),
+                            member.getName(),
+                            currentBlocker,
+                            blocker.getConsecutiveDays()
+                    );
+
+                    String message =
+                            slackMessageFormatter.formatUnresolvedBlockerAlert(content);
+
+                    notificationService.sendChannelMessage(
+                            member.getTeam().getWebhookUrl(),
+                            message
+                    );
+                }
+            }
+
             return;
         }
         blocker.setStandupId(standup.getId());

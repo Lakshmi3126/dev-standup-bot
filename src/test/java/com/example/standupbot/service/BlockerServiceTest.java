@@ -2,14 +2,20 @@ package com.example.standupbot.service;
 
 import com.example.standupbot.entity.Blocker;
 import com.example.standupbot.entity.Standup;
+import com.example.standupbot.entity.Member;
+import com.example.standupbot.entity.Team;
 import com.example.standupbot.repository.BlockerRepository;
 import com.example.standupbot.repository.StandupRepository;
 import com.example.standupbot.repository.MemberRepository;
-import com.example.standupbot.entity.Member;
+import com.example.standupbot.notification.NotificationService;
+import com.example.standupbot.notification.SlackMessageFormatter;
+import com.example.standupbot.notification.BlockerAlertContent;
 import com.example.standupbot.dto.BlockerResponse;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -32,11 +38,17 @@ class BlockerServiceTest {
     @Mock
     private StandupRepository standupRepository;
 
-    private Clock clock;
-    private BlockerService blockerService;
-
     @Mock
     private MemberRepository memberRepository;
+
+    @Mock
+    private NotificationService notificationService;
+
+    @Mock
+    private SlackMessageFormatter slackMessageFormatter;
+
+    private Clock clock;
+    private BlockerService blockerService;
 
     @BeforeEach
     void setUp() {
@@ -48,11 +60,14 @@ class BlockerServiceTest {
                 blockerRepository,
                 standupRepository,
                 memberRepository,
+                notificationService,
+                slackMessageFormatter,
                 clock);
     }
 
     @Test
     void shouldCreateFirstBlocker() {
+
         Standup standup = new Standup();
         standup.setId(100L);
         standup.setTeamId(1L);
@@ -86,21 +101,77 @@ class BlockerServiceTest {
         assertEquals(1, saved.getConsecutiveDays());
         assertEquals(Blocker.Status.ACTIVE, saved.getStatus());
     }
+
+    @Test
+    void shouldSendImmediateBlockerAlertForNewBlocker() {
+
+        Standup standup = new Standup();
+        standup.setId(100L);
+        standup.setTeamId(1L);
+        standup.setMemberId(10L);
+        standup.setStandupDate(LocalDate.of(2026, 8, 31));
+        standup.setBlockers("API is broken");
+        standup.setSubmittedAt(
+                Instant.parse("2026-08-31T04:00:00Z"));
+
+        Team team = new Team();
+        team.setId(1L);
+        team.setName("Development Team");
+        team.setWebhookUrl("https://example.com/webhook");
+
+        Member member = new Member();
+        member.setId(10L);
+        member.setName("Lakshmi");
+        member.setTeam(team);
+
+        when(standupRepository
+                .findTopByTeamIdAndMemberIdAndStandupDateLessThanOrderByStandupDateDesc(
+                        1L, 10L, LocalDate.of(2026, 8, 31)))
+                .thenReturn(null);
+
+        when(blockerRepository
+                .findTopByMemberIdOrderByLastReportedAtDesc(10L))
+                .thenReturn(Optional.empty());
+
+        when(memberRepository.findByIdAndTeamId(10L, 1L))
+                .thenReturn(Optional.of(member));
+
+        when(slackMessageFormatter.formatBlockerAlert(
+                any(BlockerAlertContent.class)))
+                .thenReturn("Blocker alert message");
+
+        blockerService.processStandup(standup);
+
+        verify(blockerRepository).save(any(Blocker.class));
+
+        verify(slackMessageFormatter)
+                .formatBlockerAlert(
+                        any(BlockerAlertContent.class));
+
+        verify(notificationService)
+                .sendChannelMessage(
+                        "https://example.com/webhook",
+                        "Blocker alert message");
+    }
+
     @Test
     void shouldIncrementStreakForSameBlockerOnNextWorkingDay() {
+
         Standup previousStandup = new Standup();
         previousStandup.setId(100L);
         previousStandup.setTeamId(1L);
         previousStandup.setMemberId(10L);
-        previousStandup.setStandupDate(LocalDate.of(2026, 8, 31)); // Monday
+        previousStandup.setStandupDate(
+                LocalDate.of(2026, 8, 31));
         previousStandup.setBlockers("API is broken");
 
         Standup currentStandup = new Standup();
         currentStandup.setId(101L);
         currentStandup.setTeamId(1L);
         currentStandup.setMemberId(10L);
-        currentStandup.setStandupDate(LocalDate.of(2026, 9, 1)); // Tuesday
-        currentStandup.setBlockers("api is broken"); // different case
+        currentStandup.setStandupDate(
+                LocalDate.of(2026, 9, 1));
+        currentStandup.setBlockers("api is broken");
         currentStandup.setSubmittedAt(
                 Instant.parse("2026-09-01T04:00:00Z"));
 
@@ -128,21 +199,25 @@ class BlockerServiceTest {
         assertEquals(Blocker.Status.ACTIVE, existingBlocker.getStatus());
         assertEquals("api is broken", existingBlocker.getDescription());
         assertEquals(101L, existingBlocker.getStandupId());
-        }
-        @Test
+    }
+
+    @Test
     void shouldResetStreakWhenBlockerChanges() {
+
         Standup previousStandup = new Standup();
         previousStandup.setId(100L);
         previousStandup.setTeamId(1L);
         previousStandup.setMemberId(10L);
-        previousStandup.setStandupDate(LocalDate.of(2026, 8, 31));
+        previousStandup.setStandupDate(
+                LocalDate.of(2026, 8, 31));
         previousStandup.setBlockers("API is broken");
 
         Standup currentStandup = new Standup();
         currentStandup.setId(101L);
         currentStandup.setTeamId(1L);
         currentStandup.setMemberId(10L);
-        currentStandup.setStandupDate(LocalDate.of(2026, 9, 1));
+        currentStandup.setStandupDate(
+                LocalDate.of(2026, 9, 1));
         currentStandup.setBlockers("Database is down");
         currentStandup.setSubmittedAt(
                 Instant.parse("2026-09-01T04:00:00Z"));
@@ -171,21 +246,34 @@ class BlockerServiceTest {
         assertEquals(Blocker.Status.ACTIVE, existingBlocker.getStatus());
         assertEquals("Database is down", existingBlocker.getDescription());
         assertEquals(101L, existingBlocker.getStandupId());
+
+        verify(slackMessageFormatter, never())
+                .formatUnresolvedBlockerAlert(
+                        any(BlockerAlertContent.class));
+
+        verify(notificationService, never())
+                .sendChannelMessage(
+                        anyString(),
+                        eq("Unresolved blocker alert"));
     }
+
     @Test
     void shouldMarkBlockerUnresolvedAfterThreeConsecutiveDays() {
+
         Standup previousStandup = new Standup();
         previousStandup.setId(101L);
         previousStandup.setTeamId(1L);
         previousStandup.setMemberId(10L);
-        previousStandup.setStandupDate(LocalDate.of(2026, 9, 1));
+        previousStandup.setStandupDate(
+                LocalDate.of(2026, 9, 1));
         previousStandup.setBlockers("API is broken");
 
         Standup currentStandup = new Standup();
         currentStandup.setId(102L);
         currentStandup.setTeamId(1L);
         currentStandup.setMemberId(10L);
-        currentStandup.setStandupDate(LocalDate.of(2026, 9, 2));
+        currentStandup.setStandupDate(
+                LocalDate.of(2026, 9, 2));
         currentStandup.setBlockers("api is broken");
         currentStandup.setSubmittedAt(
                 Instant.parse("2026-09-02T04:00:00Z"));
@@ -197,6 +285,16 @@ class BlockerServiceTest {
         existingBlocker.setConsecutiveDays(2);
         existingBlocker.setStatus(Blocker.Status.ACTIVE);
 
+        Team team = new Team();
+        team.setId(1L);
+        team.setName("Development Team");
+        team.setWebhookUrl("https://example.com/webhook");
+
+        Member member = new Member();
+        member.setId(10L);
+        member.setName("Lakshmi");
+        member.setTeam(team);
+
         when(standupRepository
                 .findTopByTeamIdAndMemberIdAndStandupDateLessThanOrderByStandupDateDesc(
                         1L, 10L, LocalDate.of(2026, 9, 2)))
@@ -206,29 +304,55 @@ class BlockerServiceTest {
                 .findTopByMemberIdOrderByLastReportedAtDesc(10L))
                 .thenReturn(Optional.of(existingBlocker));
 
+        when(memberRepository.findByIdAndTeamId(10L, 1L))
+                .thenReturn(Optional.of(member));
+
+        when(slackMessageFormatter.formatUnresolvedBlockerAlert(
+                any(BlockerAlertContent.class)))
+                .thenReturn("Unresolved blocker alert");
+
         blockerService.processStandup(currentStandup);
 
         verify(blockerRepository).save(existingBlocker);
 
+        verify(slackMessageFormatter)
+                .formatUnresolvedBlockerAlert(
+                        any(BlockerAlertContent.class));
+
+        verify(notificationService)
+                .sendChannelMessage(
+                        "https://example.com/webhook",
+                        "Unresolved blocker alert");
+
         assertEquals(3, existingBlocker.getConsecutiveDays());
-        assertEquals(Blocker.Status.UNRESOLVED, existingBlocker.getStatus());
-        assertEquals("api is broken", existingBlocker.getDescription());
-        assertEquals(102L, existingBlocker.getStandupId());
+        assertEquals(
+                Blocker.Status.UNRESOLVED,
+                existingBlocker.getStatus());
+        assertEquals(
+                "api is broken",
+                existingBlocker.getDescription());
+        assertEquals(
+                102L,
+                existingBlocker.getStandupId());
     }
+
     @Test
     void shouldContinueStreakFromFridayToMonday() {
+
         Standup previousStandup = new Standup();
         previousStandup.setId(100L);
         previousStandup.setTeamId(1L);
         previousStandup.setMemberId(10L);
-        previousStandup.setStandupDate(LocalDate.of(2026, 9, 4)); // Friday
+        previousStandup.setStandupDate(
+                LocalDate.of(2026, 9, 4));
         previousStandup.setBlockers("API is broken");
 
         Standup currentStandup = new Standup();
         currentStandup.setId(101L);
         currentStandup.setTeamId(1L);
         currentStandup.setMemberId(10L);
-        currentStandup.setStandupDate(LocalDate.of(2026, 9, 7)); // Monday
+        currentStandup.setStandupDate(
+                LocalDate.of(2026, 9, 7));
         currentStandup.setBlockers("API is broken");
         currentStandup.setSubmittedAt(
                 Instant.parse("2026-09-07T04:00:00Z"));
@@ -256,20 +380,24 @@ class BlockerServiceTest {
         assertEquals(2, existingBlocker.getConsecutiveDays());
         assertEquals(Blocker.Status.ACTIVE, existingBlocker.getStatus());
     }
+
     @Test
     void shouldResetStreakWhenAWorkingDayIsMissed() {
+
         Standup previousStandup = new Standup();
         previousStandup.setId(100L);
         previousStandup.setTeamId(1L);
         previousStandup.setMemberId(10L);
-        previousStandup.setStandupDate(LocalDate.of(2026, 8, 31)); // Monday
+        previousStandup.setStandupDate(
+                LocalDate.of(2026, 8, 31));
         previousStandup.setBlockers("API is broken");
 
         Standup currentStandup = new Standup();
         currentStandup.setId(101L);
         currentStandup.setTeamId(1L);
         currentStandup.setMemberId(10L);
-        currentStandup.setStandupDate(LocalDate.of(2026, 9, 2)); // Wednesday
+        currentStandup.setStandupDate(
+                LocalDate.of(2026, 9, 2));
         currentStandup.setBlockers("API is broken");
         currentStandup.setSubmittedAt(
                 Instant.parse("2026-09-02T04:00:00Z"));
@@ -297,6 +425,7 @@ class BlockerServiceTest {
         assertEquals(1, existingBlocker.getConsecutiveDays());
         assertEquals(Blocker.Status.ACTIVE, existingBlocker.getStatus());
     }
+
     @Test
     void shouldGetMemberBlockers() {
 
@@ -318,20 +447,27 @@ class BlockerServiceTest {
         when(memberRepository.findByIdAndTeamId(10L, 1L))
                 .thenReturn(Optional.of(member));
 
-        when(blockerRepository.findByMemberIdOrderByLastReportedAtDesc(10L))
+        when(blockerRepository
+                .findByMemberIdOrderByLastReportedAtDesc(10L))
                 .thenReturn(List.of(blocker));
 
-        List<com.example.standupbot.dto.BlockerResponse> result =
+        List<BlockerResponse> result =
                 blockerService.getMemberBlockers(1L, 10L);
 
         assertEquals(1, result.size());
         assertEquals(100L, result.get(0).id());
         assertEquals(10L, result.get(0).memberId());
-        assertEquals("API is broken", result.get(0).description());
-        assertEquals(3, result.get(0).consecutiveDays());
-        assertEquals(Blocker.Status.UNRESOLVED, result.get(0).status());
+        assertEquals(
+                "API is broken",
+                result.get(0).description());
+        assertEquals(
+                3,
+                result.get(0).consecutiveDays());
+        assertEquals(
+                Blocker.Status.UNRESOLVED,
+                result.get(0).status());
     }
-    
+
     @Test
     void shouldGetTeamBlockers() {
 
@@ -368,10 +504,12 @@ class BlockerServiceTest {
         when(memberRepository.findByTeamId(1L))
                 .thenReturn(List.of(member1, member2));
 
-        when(blockerRepository.findByMemberIdOrderByLastReportedAtDesc(10L))
+        when(blockerRepository
+                .findByMemberIdOrderByLastReportedAtDesc(10L))
                 .thenReturn(List.of(blocker1));
 
-        when(blockerRepository.findByMemberIdOrderByLastReportedAtDesc(20L))
+        when(blockerRepository
+                .findByMemberIdOrderByLastReportedAtDesc(20L))
                 .thenReturn(List.of(blocker2));
 
         List<BlockerResponse> result =
@@ -382,5 +520,3 @@ class BlockerServiceTest {
         assertEquals(101L, result.get(1).id());
     }
 }
-
-

@@ -1,9 +1,11 @@
 package com.example.standupbot.notification;
+import org.springframework.stereotype.Component;
 
 /**
  * Converts notification inputs into human-readable Slack text. Does not call Slack.
  * Daily/updated digest formatting is deferred until Person 3 publishes the digest payload contract.
  */
+@Component
 public class SlackMessageFormatter {
 
     private static final String NONE = "None";

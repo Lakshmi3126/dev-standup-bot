@@ -2,8 +2,13 @@ package com.example.standupbot.scheduler;
 
 import com.example.standupbot.entity.Member;
 import com.example.standupbot.entity.Team;
+import com.example.standupbot.notification.NotificationService;
+import com.example.standupbot.notification.ReminderContent;
+import com.example.standupbot.notification.SlackMessageFormatter;
 import com.example.standupbot.repository.TeamRepository;
 import com.example.standupbot.service.StandUpAutomationService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -19,81 +24,56 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class StandUpScheduler {
 
+    private static final Logger log =
+            LoggerFactory.getLogger(StandUpScheduler.class);
+
     private final TeamRepository teamRepository;
     private final StandUpAutomationService standUpAutomationService;
+    private final NotificationService notificationService;
+    private final SlackMessageFormatter slackMessageFormatter;
 
-    /*
-     * Keeps track of reminders that have already been processed.
-     *
-     * Key example:
-     * 1-2026-09-10
-     *
-     * This prevents the same team's reminder from being
-     * sent again on every 1-minute tick.
-     */
     private final Set<String> processedReminders =
             ConcurrentHashMap.newKeySet();
 
-    /*
-     * Keeps track of deadlines that have already been processed.
-     *
-     * Key example:
-     * 1-2026-09-10
-     */
     private final Set<String> processedDeadlines =
             ConcurrentHashMap.newKeySet();
 
     public StandUpScheduler(
             TeamRepository teamRepository,
-            StandUpAutomationService standUpAutomationService) {
+            StandUpAutomationService standUpAutomationService,
+            NotificationService notificationService,
+            SlackMessageFormatter slackMessageFormatter) {
 
         this.teamRepository = teamRepository;
         this.standUpAutomationService = standUpAutomationService;
+        this.notificationService = notificationService;
+        this.slackMessageFormatter = slackMessageFormatter;
     }
 
-    /**
-     * Single fixed poller.
-     *
-     * Runs once every minute.
-     */
     @Scheduled(fixedRate = 60_000)
     public void pollTeams() {
 
-        List<Team> teams = teamRepository.findAll();
+        List<Team> teams =
+                teamRepository.findByActiveTrue();
 
         for (Team team : teams) {
-
-            /*
-             * One team's failure should not stop
-             * processing of other teams.
-             */
             try {
                 processTeam(team);
             } catch (Exception e) {
-
-                System.err.println(
-                        "Error processing team "
-                                + team.getId()
-                                + ": "
-                                + e.getMessage()
+                log.error(
+                        "Error processing team {}",
+                        team.getId(),
+                        e
                 );
             }
         }
     }
 
-    /**
-     * Processes one team independently.
-     */
     private void processTeam(Team team) {
 
-        ZoneId zoneId = ZoneId.of(team.getTimezone());
+        ZoneId zoneId =
+                ZoneId.of(team.getTimezone());
 
-        /*
-         * IMPORTANT:
-         *
-         * We calculate the current time using
-         * THIS TEAM'S timezone.
-         */
         ZonedDateTime now =
                 ZonedDateTime.now(zoneId);
 
@@ -103,15 +83,11 @@ public class StandUpScheduler {
         LocalTime currentTime =
                 now.toLocalTime();
 
-        /*
-         * Only process weekdays.
-         */
         DayOfWeek day =
                 today.getDayOfWeek();
 
         if (day == DayOfWeek.SATURDAY
                 || day == DayOfWeek.SUNDAY) {
-
             return;
         }
 
@@ -119,35 +95,28 @@ public class StandUpScheduler {
                 team.getDeadline();
 
         /*
-         * -----------------------------------------
-         * 10-MINUTE REMINDER
-         * -----------------------------------------
-         *
-         * Example:
-         *
-         * Deadline = 10:00
-         *
-         * Reminder window = 09:50 - 10:00
+         * Reminder should run only during the
+         * single 1-minute scheduler tick that
+         * starts exactly 10 minutes before deadline.
          */
         LocalTime reminderStart =
                 deadline.minusMinutes(10);
 
+        LocalTime reminderEnd =
+                reminderStart.plusMinutes(1);
+
         boolean insideReminderWindow =
                 !currentTime.isBefore(reminderStart)
-                        && currentTime.isBefore(deadline);
+                        && currentTime.isBefore(reminderEnd);
 
         if (insideReminderWindow) {
-
             processReminder(team, today);
         }
 
         /*
-         * -----------------------------------------
-         * DEADLINE
-         * -----------------------------------------
-         *
-         * We allow a one-minute window because
-         * the scheduler runs once every minute.
+         * Deadline processing should run only
+         * during the single 1-minute tick starting
+         * exactly at the deadline.
          */
         LocalTime deadlineEnd =
                 deadline.plusMinutes(1);
@@ -157,18 +126,10 @@ public class StandUpScheduler {
                         && currentTime.isBefore(deadlineEnd);
 
         if (insideDeadlineWindow) {
-
             processDeadline(team, today);
         }
     }
 
-    /**
-     * Finds members who have not submitted today's
-     * standup.
-     *
-     * P4 will use the missing members to send
-     * personal Slack reminders.
-     */
     private void processReminder(
             Team team,
             LocalDate today) {
@@ -177,8 +138,8 @@ public class StandUpScheduler {
                 team.getId() + "-" + today;
 
         /*
-         * Don't process the same reminder repeatedly
-         * during the 10-minute window.
+         * Prevent duplicate reminders for the
+         * same team on the same day.
          */
         if (!processedReminders.add(reminderKey)) {
             return;
@@ -190,44 +151,32 @@ public class StandUpScheduler {
                         today
                 );
 
-        /*
-         * Only members with a valid Slack user ID
-         * are eligible for a personal Slack reminder.
-         */
-        List<Member> membersWithSlackId =
-                missingMembers.stream()
-                        .filter(member ->
-                                member.getSlackUserId() != null
-                                        && !member.getSlackUserId().isBlank())
-                        .toList();
+        for (Member member : missingMembers) {
 
-        System.out.println(
-                "Team " + team.getName()
-                        + " has "
-                        + membersWithSlackId.size()
-                        + " missing members for reminder."
-        );
+            if (member.getSlackUserId() == null
+                    || member.getSlackUserId().isBlank()) {
+                continue;
+            }
 
-        /*
-         * P4 owns NotificationService and Slack sending.
-         *
-         * We intentionally do NOT create another Slack client here.
-         *
-         * P4 should use:
-         *
-         * notificationService.sendPersonalMessage(
-         *      team.getSlackBotToken(),
-         *      member.getSlackUserId(),
-         *      Message
-         * );
-         *
-         * using ReminderContent + SlackMessageFormatter.
-         */
+            ReminderContent reminderContent =
+                    new ReminderContent(
+                            member.getName(),
+                            team.getDeadline().toString()
+                    );
+
+            String message =
+                    slackMessageFormatter.formatPersonalReminder(
+                            reminderContent
+                    );
+
+            notificationService.sendPersonalMessage(
+                    team.getSlackBotToken(),
+                    member.getSlackUserId(),
+                    message
+            );
+        }
     }
 
-    /**
-     * Processes the team's deadline.
-     */
     private void processDeadline(
             Team team,
             LocalDate today) {
@@ -237,23 +186,35 @@ public class StandUpScheduler {
 
         /*
          * Prevent duplicate deadline processing
-         * during the one-minute window.
+         * for the same team on the same day.
          */
         if (!processedDeadlines.add(deadlineKey)) {
             return;
         }
 
-        /*
-         * StandUpAutomationService handles:
-         *
-         * - finding today's standups
-         * - determining missing members
-         * - building the digest
-         * - creating the PENDING DigestLog
-         */
         standUpAutomationService.processDeadline(
                 team,
                 today
         );
+    }
+
+    /*
+     * TeamService still calls this method.
+     *
+     * Actual deadline scheduling is handled by
+     * the fixed 1-minute poller above.
+     */
+    public void scheduleTeamDeadline(Team team) {
+        // No individual task is required.
+    }
+
+    /*
+     * TeamService still calls this method.
+     *
+     * Inactive teams are automatically excluded
+     * by findByActiveTrue().
+     */
+    public void cancelTeamDeadline(Long teamId) {
+        // No individual task is required.
     }
 }

@@ -3,6 +3,8 @@ package com.example.standupbot.service;
 import com.example.standupbot.dto.DailyDigestData;
 import com.example.standupbot.entity.DigestLog;
 import com.example.standupbot.entity.Team;
+import com.example.standupbot.notification.NotificationService;
+import com.example.standupbot.notification.SlackMessageFormatter;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 
@@ -21,10 +23,9 @@ public class DigestDebounceService {
     private final TaskScheduler taskScheduler;
     private final DailyDigestService dailyDigestService;
     private final DigestLogService digestLogService;
+    private final NotificationService notificationService;
+    private final SlackMessageFormatter slackMessageFormatter;
 
-    /*
-     * One pending update per team/date.
-     */
     private final Map<String, ScheduledFuture<?>>
             pendingUpdates =
             new ConcurrentHashMap<>();
@@ -32,11 +33,15 @@ public class DigestDebounceService {
     public DigestDebounceService(
             TaskScheduler taskScheduler,
             DailyDigestService dailyDigestService,
-            DigestLogService digestLogService) {
+            DigestLogService digestLogService,
+            NotificationService notificationService,
+            SlackMessageFormatter slackMessageFormatter) {
 
         this.taskScheduler = taskScheduler;
         this.dailyDigestService = dailyDigestService;
         this.digestLogService = digestLogService;
+        this.notificationService = notificationService;
+        this.slackMessageFormatter = slackMessageFormatter;
     }
 
     /**
@@ -81,7 +86,8 @@ public class DigestDebounceService {
     }
 
     /**
-     * Regenerates the latest digest after the debounce.
+     * Regenerates and sends the latest digest after
+     * the debounce period.
      */
     private void processUpdatedDigest(
             Team team,
@@ -96,23 +102,35 @@ public class DigestDebounceService {
                             date
                     );
 
-            /*
-             * P4 will receive this digest and send
-             * the updated Slack message.
-             *
-             * No Slack implementation is placed here.
-             */
-
             DigestLog log =
                     digestLogService.findToday(
                             team.getId(),
                             date
                     ).orElse(null);
 
-            if (log != null) {
-
-                digestLogService.recordUpdate(log);
+            if (log == null) {
+                return;
             }
+
+            String message =
+                    slackMessageFormatter.formatDailyDigest(
+                            digest
+                    );
+
+            /*
+             * Send the updated digest through the
+             * existing P4 NotificationService.
+             */
+            notificationService.sendChannelMessage(
+                    team.getWebhookUrl(),
+                    message
+            );
+
+            /*
+             * Increment update_count only AFTER
+             * successful Slack delivery.
+             */
+            digestLogService.recordUpdate(log);
 
         } finally {
 
@@ -121,7 +139,7 @@ public class DigestDebounceService {
     }
 
     /**
-     * Used when the previous digest delivery failed.
+     * Retries a digest whose previous delivery failed.
      */
     public void sendFailedDigest(
             Team team,
@@ -129,16 +147,28 @@ public class DigestDebounceService {
             DailyDigestData digest,
             DigestLog log) {
 
-        /*
-         * P4 will send the digest.
-         *
-         * We don't implement Slack here.
-         */
+        String message =
+                slackMessageFormatter.formatDailyDigest(
+                        digest
+                );
 
-        System.out.println(
-                "Digest delivery previously failed for team "
-                        + team.getId()
-                        + ". Regenerated digest."
-        );
+        try {
+
+            notificationService.sendChannelMessage(
+                    team.getWebhookUrl(),
+                    message
+            );
+
+            digestLogService.markSent(
+                    log,
+                    null
+            );
+
+        } catch (Exception e) {
+
+            digestLogService.markFailed(log);
+
+            throw e;
+        }
     }
 }

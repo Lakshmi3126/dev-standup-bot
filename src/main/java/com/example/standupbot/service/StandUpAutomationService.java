@@ -1,9 +1,12 @@
 package com.example.standupbot.service;
 
 import com.example.standupbot.dto.DailyDigestData;
+import com.example.standupbot.entity.DigestLog;
 import com.example.standupbot.entity.Member;
 import com.example.standupbot.entity.Standup;
 import com.example.standupbot.entity.Team;
+import com.example.standupbot.notification.NotificationService;
+import com.example.standupbot.notification.SlackMessageFormatter;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.repository.StandupRepository;
 import org.springframework.stereotype.Service;
@@ -19,15 +22,21 @@ public class StandUpAutomationService {
     private final MemberRepository memberRepository;
     private final StandupRepository standupRepository;
     private final DigestLogService digestLogService;
+    private final NotificationService notificationService;
+    private final SlackMessageFormatter slackMessageFormatter;
 
     public StandUpAutomationService(
             MemberRepository memberRepository,
             StandupRepository standupRepository,
-            DigestLogService digestLogService) {
+            DigestLogService digestLogService,
+            NotificationService notificationService,
+            SlackMessageFormatter slackMessageFormatter) {
 
         this.memberRepository = memberRepository;
         this.standupRepository = standupRepository;
         this.digestLogService = digestLogService;
+        this.notificationService = notificationService;
+        this.slackMessageFormatter = slackMessageFormatter;
     }
 
     /**
@@ -63,8 +72,11 @@ public class StandUpAutomationService {
     /**
      * Processes the team's daily deadline.
      *
-     * Builds the daily digest and creates
-     * the PENDING DigestLog before Slack delivery.
+     * Creates the PENDING DigestLog before attempting
+     * Slack delivery.
+     *
+     * Successful delivery changes the log to SENT.
+     * Failed delivery changes the log to FAILED.
      */
     public DailyDigestData processDeadline(
             Team team,
@@ -75,6 +87,40 @@ public class StandUpAutomationService {
                         team,
                         today
                 );
+
+        DigestLog log =
+                digestLogService.findToday(
+                        team.getId(),
+                        today
+                ).orElseThrow(() ->
+                        new IllegalStateException(
+                                "DigestLog was not created"
+                        )
+                );
+
+        String message =
+                slackMessageFormatter.formatDailyDigest(
+                        digest
+                );
+
+        try {
+
+            notificationService.sendChannelMessage(
+                    team.getWebhookUrl(),
+                    message
+            );
+
+            digestLogService.markSent(
+                    log,
+                    null
+            );
+
+        } catch (Exception e) {
+
+            digestLogService.markFailed(log);
+
+            throw e;
+        }
 
         return digest;
     }

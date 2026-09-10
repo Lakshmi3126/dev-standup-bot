@@ -1,5 +1,4 @@
 package com.example.standupbot.service;
-import com.example.standupbot.scheduler.StandupScheduler;
 import com.example.standupbot.dto.CreateTeamRequest;
 import com.example.standupbot.dto.TeamResponse;
 import com.example.standupbot.entity.Team;
@@ -14,7 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-
+import com.example.standupbot.scheduler.StandUpScheduler;
 import java.time.LocalTime;
 import java.util.Optional;
 
@@ -34,7 +33,7 @@ class TeamServiceTest {
     private MemberRepository memberRepository;
 
     @Mock
-    private StandupScheduler standupScheduler;
+    private StandUpScheduler standupScheduler;
 
     @InjectMocks
     private TeamService teamService;

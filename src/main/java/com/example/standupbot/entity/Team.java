@@ -19,6 +19,9 @@ public class Team {
     private String timezone;
 
     @Column(nullable = false)
+    private boolean active = true;
+
+    @Column(nullable = false)
     private LocalTime deadline;
 
     @Column(name = "webhook_url")

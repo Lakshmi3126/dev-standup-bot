@@ -5,10 +5,10 @@ import com.example.standupbot.dto.MemberResponse;
 import com.example.standupbot.dto.UpdateMemberRequest;
 import com.example.standupbot.entity.Member;
 import com.example.standupbot.entity.Team;
+import com.example.standupbot.exception.ConflictException;
 import com.example.standupbot.exception.ResourceNotFoundException;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.repository.TeamRepository;
-
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -23,7 +23,6 @@ public class MemberService {
     public MemberService(
             MemberRepository memberRepository,
             TeamRepository teamRepository) {
-
         this.memberRepository = memberRepository;
         this.teamRepository = teamRepository;
     }
@@ -40,8 +39,18 @@ public class MemberService {
                                 "Team not found with id: " + teamId
                         ));
 
-        Member member = new Member();
+        // A team cannot have two members with the same email.
+        if (memberRepository.existsByTeamIdAndEmail(
+                teamId,
+                request.getEmail())) {
 
+            throw new ConflictException(
+                    "Member with email already exists in this team: "
+                            + request.getEmail()
+            );
+        }
+
+        Member member = new Member();
         member.setTeam(team);
         member.setName(request.getName());
         member.setEmail(request.getEmail());
@@ -94,6 +103,18 @@ public class MemberService {
                         new ResourceNotFoundException(
                                 "Member not found with id: " + memberId
                         ));
+
+        // Prevent changing the email to another member's email.
+        if (memberRepository.existsByTeamIdAndEmailAndIdNot(
+                teamId,
+                request.getEmail(),
+                memberId)) {
+
+            throw new ConflictException(
+                    "Member with email already exists in this team: "
+                            + request.getEmail()
+            );
+        }
 
         member.setName(request.getName());
         member.setEmail(request.getEmail());

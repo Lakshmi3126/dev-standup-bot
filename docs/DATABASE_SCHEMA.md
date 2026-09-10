@@ -26,6 +26,14 @@ The core database contains:
 
 # 3. TEAM
 
+### Team Constraints
+
+- `deadline` is required.
+- `webhook_url` is required.
+- `slack_bot_token` is required.
+- `slack_workspace_id` is stored but is not exposed through the API.
+- Do not add additional uniqueness constraints beyond those explicitly defined in this schema.
+
 Stores team configuration.
 
 ### Fields
@@ -80,7 +88,9 @@ Many Members
 
 ### Note on slack_user_id
 
-`slack_user_id` is required if personal reminders are enabled for the team. Validate it's non-null before the reminder job attempts to DM a member; skip (and log) members without one rather than failing the whole reminder batch.
+`slack_user_id` is optional.
+
+Members without a `slack_user_id` are skipped and logged when personal Slack reminders are sent. 
 
 ---
 

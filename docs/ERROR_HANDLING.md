@@ -109,7 +109,8 @@ Every unmapped exception must still be caught by a catch-all handler and returne
 
 ## 7. Open Decisions (resolve as a team before implementing)
 
-- [ ] Team deletion with existing members/standups: cascade vs. block.
+- Deleting a team that still has members returns `409 CONFLICT`.
+- Team deletion does not cascade to members.
 - [ ] Should `SlackDeliveryException` retries be synchronous (blocking the scheduler) or async/queued? Recommend starting synchronous with a short timeout for v1 simplicity, revisit if it delays other teams' processing.
 
 ---

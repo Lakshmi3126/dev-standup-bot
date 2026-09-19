@@ -70,10 +70,12 @@ class DigestDebounceServiceTest {
         team.setName("Engineering");
         team.setWebhookUrl("webhook-url");
 
-        when(taskScheduler.schedule(
-                any(Runnable.class),
-                any(Instant.class)))
-                .thenReturn(scheduledFuture);
+        doReturn(scheduledFuture)
+            .when(taskScheduler)
+            .schedule(
+                    any(Runnable.class),
+                    any(Instant.class)
+            );
     }
 
     @Test

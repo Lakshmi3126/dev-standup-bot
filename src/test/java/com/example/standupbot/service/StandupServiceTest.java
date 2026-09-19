@@ -8,6 +8,7 @@ import com.example.standupbot.entity.Team;
 import com.example.standupbot.exception.DuplicateSubmissionException;
 import com.example.standupbot.exception.ResourceNotFoundException;
 import com.example.standupbot.exception.TeamMemberMismatchException;
+import com.example.standupbot.exception.SlackDeliveryException;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.repository.StandupRepository;
 import com.example.standupbot.repository.TeamRepository;
@@ -459,4 +460,71 @@ class StandupServiceTest {
 
         return member;
     }
+    @Test
+void shouldNotRollbackStandupWhenLateSubmissionNotificationFails() {
+
+    Instant lateInstant =
+            Instant.parse("2026-08-31T05:00:00Z");
+
+    clock = Clock.fixed(lateInstant, ZoneId.of("UTC"));
+
+    standupService = new StandupService(
+            standupRepository,
+            teamRepository,
+            memberRepository,
+            clock,
+            lateSubmissionService);
+
+    Team team =
+            createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
+
+    Member member =
+            createMember(10L, team);
+
+    SubmitStandupRequest request =
+            new SubmitStandupRequest(
+                    10L,
+                    "Completed login API",
+                    "Work on authentication",
+                    "Blocker");
+
+    when(teamRepository.findById(1L))
+            .thenReturn(Optional.of(team));
+
+    when(memberRepository.findById(10L))
+            .thenReturn(Optional.of(member));
+
+    when(standupRepository
+            .existsByTeamIdAndMemberIdAndStandupDate(
+                    1L,
+                    10L,
+                    LocalDate.of(2026, 8, 31)))
+            .thenReturn(false);
+
+    when(standupRepository.saveAndFlush(any(Standup.class)))
+            .thenAnswer(invocation -> {
+                Standup standup = invocation.getArgument(0);
+                standup.setId(104L);
+                return standup;
+            });
+
+    doThrow(new SlackDeliveryException("Slack failed"))
+            .when(lateSubmissionService)
+            .handleLateSubmission(
+                    team,
+                    LocalDate.of(2026, 8, 31));
+
+    StandupResponse response =
+            standupService.submitStandup(1L, request);
+
+    assertEquals(Standup.Status.LATE, response.status());
+
+    verify(standupRepository)
+            .saveAndFlush(any(Standup.class));
+
+    verify(lateSubmissionService)
+            .handleLateSubmission(
+                    team,
+                    LocalDate.of(2026, 8, 31));
+}
 }

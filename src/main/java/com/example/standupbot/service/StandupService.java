@@ -8,6 +8,7 @@ import com.example.standupbot.entity.Team;
 import com.example.standupbot.exception.DuplicateSubmissionException;
 import com.example.standupbot.exception.ResourceNotFoundException;
 import com.example.standupbot.exception.TeamMemberMismatchException;
+import com.example.standupbot.exception.SlackDeliveryException;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.repository.StandupRepository;
 import com.example.standupbot.repository.TeamRepository;
@@ -100,10 +101,14 @@ public class StandupService {
 
             // Late submissions trigger the P3 late-submission workflow.
             if (status == Standup.Status.LATE) {
-                lateSubmissionService.handleLateSubmission(
-                        team,
-                        standupDate);
-            }
+                try {
+                        lateSubmissionService.handleLateSubmission(
+                                team,
+                                standupDate);
+                } catch (SlackDeliveryException e) {
+                        // Slack failure must not prevent the late standup from being saved.
+                }
+                }
 
             return toResponse(saved);
 

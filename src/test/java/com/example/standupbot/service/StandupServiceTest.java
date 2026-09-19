@@ -39,6 +39,9 @@ class StandupServiceTest {
     @Mock
     private MemberRepository memberRepository;
 
+    @Mock
+    private LateSubmissionService lateSubmissionService;
+
     private Clock clock;
     private StandupService standupService;
 
@@ -53,7 +56,8 @@ class StandupServiceTest {
                 standupRepository,
                 teamRepository,
                 memberRepository,
-                clock);
+                clock,
+                lateSubmissionService);
     }
 
     @Test
@@ -109,7 +113,8 @@ class StandupServiceTest {
                 standupRepository,
                 teamRepository,
                 memberRepository,
-                clock);
+                clock,
+                lateSubmissionService);
 
         Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
         Member member = createMember(10L, team);
@@ -240,156 +245,158 @@ class StandupServiceTest {
 
     @Test
     void shouldMarkStandupOnTimeAtExactDeadline() {
-    Instant deadlineInstant =
-            Instant.parse("2026-08-31T04:30:00Z");
+        Instant deadlineInstant =
+                Instant.parse("2026-08-31T04:30:00Z");
 
-    clock = Clock.fixed(deadlineInstant, ZoneId.of("UTC"));
+        clock = Clock.fixed(deadlineInstant, ZoneId.of("UTC"));
 
-    standupService = new StandupService(
-            standupRepository,
-            teamRepository,
-            memberRepository,
-            clock);
+        standupService = new StandupService(
+                standupRepository,
+                teamRepository,
+                memberRepository,
+                clock,
+                lateSubmissionService);
 
-    Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
-    Member member = createMember(10L, team);
+        Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
+        Member member = createMember(10L, team);
 
-    SubmitStandupRequest request = new SubmitStandupRequest(
-            10L,
-            "Completed login API",
-            "Work on authentication",
-            "None");
+        SubmitStandupRequest request = new SubmitStandupRequest(
+                10L,
+                "Completed login API",
+                "Work on authentication",
+                "None");
 
-    when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
-    when(memberRepository.findById(10L)).thenReturn(Optional.of(member));
-    when(standupRepository
-            .existsByTeamIdAndMemberIdAndStandupDate(
-                    1L, 10L, LocalDate.of(2026, 8, 31)))
-            .thenReturn(false);
+        when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
+        when(memberRepository.findById(10L)).thenReturn(Optional.of(member));
+        when(standupRepository
+                .existsByTeamIdAndMemberIdAndStandupDate(
+                        1L, 10L, LocalDate.of(2026, 8, 31)))
+                .thenReturn(false);
 
-    when(standupRepository.saveAndFlush(any(Standup.class)))
-            .thenAnswer(invocation -> {
-                Standup standup = invocation.getArgument(0);
-                standup.setId(102L);
-                return standup;
-            });
+        when(standupRepository.saveAndFlush(any(Standup.class)))
+                .thenAnswer(invocation -> {
+                    Standup standup = invocation.getArgument(0);
+                    standup.setId(102L);
+                    return standup;
+                });
 
-    StandupResponse response =
-            standupService.submitStandup(1L, request);
+        StandupResponse response =
+                standupService.submitStandup(1L, request);
 
-    assertEquals(Standup.Status.ON_TIME, response.status());
+        assertEquals(Standup.Status.ON_TIME, response.status());
     }
 
     @Test
     void shouldUseTeamTimezoneForStandupDate() {
-    Instant instant =
-            Instant.parse("2026-08-31T23:30:00Z");
+        Instant instant =
+                Instant.parse("2026-08-31T23:30:00Z");
 
-    clock = Clock.fixed(instant, ZoneId.of("UTC"));
+        clock = Clock.fixed(instant, ZoneId.of("UTC"));
 
-    standupService = new StandupService(
-            standupRepository,
-            teamRepository,
-            memberRepository,
-            clock);
+        standupService = new StandupService(
+                standupRepository,
+                teamRepository,
+                memberRepository,
+                clock,
+                lateSubmissionService);
 
-    Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
-    Member member = createMember(10L, team);
+        Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
+        Member member = createMember(10L, team);
 
-    SubmitStandupRequest request = new SubmitStandupRequest(
-            10L,
-            "Completed login API",
-            "Work on authentication",
-            "None");
+        SubmitStandupRequest request = new SubmitStandupRequest(
+                10L,
+                "Completed login API",
+                "Work on authentication",
+                "None");
 
-    when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
-    when(memberRepository.findById(10L)).thenReturn(Optional.of(member));
+        when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
+        when(memberRepository.findById(10L)).thenReturn(Optional.of(member));
 
-    when(standupRepository
-            .existsByTeamIdAndMemberIdAndStandupDate(
-                    1L, 10L, LocalDate.of(2026, 9, 1)))
-            .thenReturn(false);
+        when(standupRepository
+                .existsByTeamIdAndMemberIdAndStandupDate(
+                        1L, 10L, LocalDate.of(2026, 9, 1)))
+                .thenReturn(false);
 
-    when(standupRepository.saveAndFlush(any(Standup.class)))
-            .thenAnswer(invocation -> {
-                Standup standup = invocation.getArgument(0);
-                standup.setId(103L);
-                return standup;
-            });
+        when(standupRepository.saveAndFlush(any(Standup.class)))
+                .thenAnswer(invocation -> {
+                    Standup standup = invocation.getArgument(0);
+                    standup.setId(103L);
+                    return standup;
+                });
 
-    StandupResponse response =
-            standupService.submitStandup(1L, request);
+        StandupResponse response =
+                standupService.submitStandup(1L, request);
 
-    assertEquals(
-            LocalDate.of(2026, 9, 1),
-            response.standupDate());
+        assertEquals(
+                LocalDate.of(2026, 9, 1),
+                response.standupDate());
 
-    assertEquals(
-            Instant.parse("2026-08-31T23:30:00Z"),
-            response.submittedAt());
+        assertEquals(
+                Instant.parse("2026-08-31T23:30:00Z"),
+                response.submittedAt());
     }
 
     @Test
     void shouldGetMemberStandups() {
-    Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
-    Member member = createMember(10L, team);
+        Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
+        Member member = createMember(10L, team);
 
-    Standup standup = new Standup();
-    standup.setId(100L);
-    standup.setTeamId(1L);
-    standup.setMemberId(10L);
-    standup.setStandupDate(LocalDate.of(2026, 8, 31));
-    standup.setYesterday("Yesterday work");
-    standup.setToday("Today work");
-    standup.setBlockers("None");
-    standup.setSubmittedAt(
-            Instant.parse("2026-08-31T04:00:00Z"));
-    standup.setStatus(Standup.Status.ON_TIME);
+        Standup standup = new Standup();
+        standup.setId(100L);
+        standup.setTeamId(1L);
+        standup.setMemberId(10L);
+        standup.setStandupDate(LocalDate.of(2026, 8, 31));
+        standup.setYesterday("Yesterday work");
+        standup.setToday("Today work");
+        standup.setBlockers("None");
+        standup.setSubmittedAt(
+                Instant.parse("2026-08-31T04:00:00Z"));
+        standup.setStatus(Standup.Status.ON_TIME);
 
-    when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
-    when(memberRepository.findById(10L))
-            .thenReturn(Optional.of(member));
+        when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
+        when(memberRepository.findById(10L))
+                .thenReturn(Optional.of(member));
 
-    when(standupRepository
-            .findByTeamIdAndMemberIdOrderByStandupDateDesc(1L, 10L))
-            .thenReturn(java.util.List.of(standup));
+        when(standupRepository
+                .findByTeamIdAndMemberIdOrderByStandupDateDesc(1L, 10L))
+                .thenReturn(java.util.List.of(standup));
 
-    var result = standupService.getMemberStandups(1L, 10L);
+        var result = standupService.getMemberStandups(1L, 10L);
 
-    assertEquals(1, result.size());
-    assertEquals(100L, result.get(0).id());
-    assertEquals(10L, result.get(0).memberId());
+        assertEquals(1, result.size());
+        assertEquals(100L, result.get(0).id());
+        assertEquals(10L, result.get(0).memberId());
     }
 
     @Test
     void shouldGetStandupsByDateRange() {
-    Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
+        Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
 
-    Standup standup = new Standup();
-    standup.setId(100L);
-    standup.setTeamId(1L);
-    standup.setMemberId(10L);
-    standup.setStandupDate(LocalDate.of(2026, 8, 25));
-    standup.setYesterday("Yesterday work");
-    standup.setToday("Today work");
-    standup.setStatus(Standup.Status.ON_TIME);
+        Standup standup = new Standup();
+        standup.setId(100L);
+        standup.setTeamId(1L);
+        standup.setMemberId(10L);
+        standup.setStandupDate(LocalDate.of(2026, 8, 25));
+        standup.setYesterday("Yesterday work");
+        standup.setToday("Today work");
+        standup.setStatus(Standup.Status.ON_TIME);
 
-    when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
+        when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
 
-    when(standupRepository
-            .findByTeamIdAndStandupDateBetweenOrderByStandupDateAsc(
-                    1L,
-                    LocalDate.of(2026, 8, 20),
-                    LocalDate.of(2026, 8, 31)))
-            .thenReturn(java.util.List.of(standup));
+        when(standupRepository
+                .findByTeamIdAndStandupDateBetweenOrderByStandupDateAsc(
+                        1L,
+                        LocalDate.of(2026, 8, 20),
+                        LocalDate.of(2026, 8, 31)))
+                .thenReturn(java.util.List.of(standup));
 
-    var result = standupService.getStandupsByDateRange(
-            1L,
-            LocalDate.of(2026, 8, 20),
-            LocalDate.of(2026, 8, 31));
+        var result = standupService.getStandupsByDateRange(
+                1L,
+                LocalDate.of(2026, 8, 20),
+                LocalDate.of(2026, 8, 31));
 
-    assertEquals(1, result.size());
-    assertEquals(100L, result.get(0).id());
+        assertEquals(1, result.size());
+        assertEquals(100L, result.get(0).id());
     }
 
     private Team createTeam(
@@ -408,38 +415,39 @@ class StandupServiceTest {
 
     @Test
     void shouldGetTodayStandupsUsingTeamTimezone() {
-    Instant instant =
-            Instant.parse("2026-08-31T23:30:00Z");
+        Instant instant =
+                Instant.parse("2026-08-31T23:30:00Z");
 
-    clock = Clock.fixed(instant, ZoneId.of("UTC"));
+        clock = Clock.fixed(instant, ZoneId.of("UTC"));
 
-    standupService = new StandupService(
-            standupRepository,
-            teamRepository,
-            memberRepository,
-            clock);
+        standupService = new StandupService(
+                standupRepository,
+                teamRepository,
+                memberRepository,
+                clock,
+                lateSubmissionService);
 
-    Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
+        Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
 
-    Standup standup = new Standup();
-    standup.setId(100L);
-    standup.setTeamId(1L);
-    standup.setMemberId(10L);
-    standup.setStandupDate(LocalDate.of(2026, 9, 1));
-    standup.setStatus(Standup.Status.ON_TIME);
+        Standup standup = new Standup();
+        standup.setId(100L);
+        standup.setTeamId(1L);
+        standup.setMemberId(10L);
+        standup.setStandupDate(LocalDate.of(2026, 9, 1));
+        standup.setStatus(Standup.Status.ON_TIME);
 
-    when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
+        when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
 
-    when(standupRepository
-            .findByTeamIdAndStandupDateOrderByStandupDateAsc(
-                    1L,
-                    LocalDate.of(2026, 9, 1)))
-            .thenReturn(java.util.List.of(standup));
+        when(standupRepository
+                .findByTeamIdAndStandupDateOrderByStandupDateAsc(
+                        1L,
+                        LocalDate.of(2026, 9, 1)))
+                .thenReturn(java.util.List.of(standup));
 
-    var result = standupService.getTodayStandups(1L);
+        var result = standupService.getTodayStandups(1L);
 
-    assertEquals(1, result.size());
-    assertEquals(100L, result.get(0).id());
+        assertEquals(1, result.size());
+        assertEquals(100L, result.get(0).id());
     }
 
     private Member createMember(Long id, Team team) {

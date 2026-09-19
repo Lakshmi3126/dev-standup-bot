@@ -29,16 +29,20 @@ public class StandupService {
     private final TeamRepository teamRepository;
     private final MemberRepository memberRepository;
     private final Clock clock;
+    private final LateSubmissionService lateSubmissionService;
 
     public StandupService(
             StandupRepository standupRepository,
             TeamRepository teamRepository,
             MemberRepository memberRepository,
-            Clock clock) {
+            Clock clock,
+            LateSubmissionService lateSubmissionService) {
+
         this.standupRepository = standupRepository;
         this.teamRepository = teamRepository;
         this.memberRepository = memberRepository;
         this.clock = clock;
+        this.lateSubmissionService = lateSubmissionService;
     }
 
     @Transactional
@@ -50,24 +54,28 @@ public class StandupService {
                 .orElseThrow(() ->
                         new ResourceNotFoundException("Team not found"));
 
-       Member member = memberRepository.findById(request.memberId())
-        .orElseThrow(() ->
-                new ResourceNotFoundException("Member not found"));
+        Member member = memberRepository.findById(request.memberId())
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Member not found"));
 
         if (!member.getTeam().getId().equals(teamId)) {
             throw new TeamMemberMismatchException(
-                "Member does not belong to team");
-}
+                    "Member does not belong to team");
+        }
 
         ZoneId zoneId = ZoneId.of(team.getTimezone());
-        ZonedDateTime now = ZonedDateTime.now(clock).withZoneSameInstant(zoneId);
+
+        ZonedDateTime now = ZonedDateTime.now(clock)
+                .withZoneSameInstant(zoneId);
 
         LocalDate standupDate = now.toLocalDate();
         Instant submittedAt = now.toInstant();
+
         if (standupRepository.existsByTeamIdAndMemberIdAndStandupDate(
-        teamId, member.getId(), standupDate)) {
+                teamId, member.getId(), standupDate)) {
+
             throw new DuplicateSubmissionException(
-             "Standup already submitted for this team member today");
+                    "Standup already submitted for this team member today");
         }
 
         Standup.Status status =
@@ -76,6 +84,7 @@ public class StandupService {
                         : Standup.Status.LATE;
 
         Standup standup = new Standup();
+
         standup.setTeamId(teamId);
         standup.setMemberId(member.getId());
         standup.setStandupDate(standupDate);
@@ -88,7 +97,16 @@ public class StandupService {
 
         try {
             Standup saved = standupRepository.saveAndFlush(standup);
+
+            // Late submissions trigger the P3 late-submission workflow.
+            if (status == Standup.Status.LATE) {
+                lateSubmissionService.handleLateSubmission(
+                        team,
+                        standupDate);
+            }
+
             return toResponse(saved);
+
         } catch (DataIntegrityViolationException ex) {
             throw new DuplicateSubmissionException(
                     "Standup already submitted for this team member today");
@@ -132,6 +150,7 @@ public class StandupService {
         Team team = validateTeamExists(teamId);
 
         ZoneId zoneId = ZoneId.of(team.getTimezone());
+
         LocalDate today = ZonedDateTime.now(clock)
                 .withZoneSameInstant(zoneId)
                 .toLocalDate();
@@ -144,11 +163,12 @@ public class StandupService {
                 .toList();
     }
 
-   private Team validateTeamExists(Long teamId) {
-    return teamRepository.findById(teamId)
-            .orElseThrow(() ->
-                    new ResourceNotFoundException("Team not found"));
+    private Team validateTeamExists(Long teamId) {
+        return teamRepository.findById(teamId)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Team not found"));
     }
+
     private void validateMemberBelongsToTeam(
             Long teamId,
             Long memberId) {
@@ -156,12 +176,12 @@ public class StandupService {
         validateTeamExists(teamId);
 
         Member member = memberRepository.findById(memberId)
-            .orElseThrow(() ->
-                    new ResourceNotFoundException("Member not found"));
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Member not found"));
 
         if (!member.getTeam().getId().equals(teamId)) {
             throw new TeamMemberMismatchException(
-                "Member does not belong to team");
+                    "Member does not belong to team");
         }
     }
 

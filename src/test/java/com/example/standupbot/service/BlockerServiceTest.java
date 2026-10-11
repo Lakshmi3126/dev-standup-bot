@@ -519,4 +519,48 @@ class BlockerServiceTest {
         assertEquals(100L, result.get(0).id());
         assertEquals(101L, result.get(1).id());
     }
+
+    
+@Test
+void shouldIgnoreLeadingAndTrailingWhitespaceWhenMatchingBlocker() {
+    Standup previousStandup = new Standup();
+    previousStandup.setId(100L);
+    previousStandup.setTeamId(1L);
+    previousStandup.setMemberId(10L);
+    previousStandup.setStandupDate(LocalDate.of(2026, 8, 31));
+    previousStandup.setBlockers("API is broken");
+
+    Standup currentStandup = new Standup();
+    currentStandup.setId(101L);
+    currentStandup.setTeamId(1L);
+    currentStandup.setMemberId(10L);
+    currentStandup.setStandupDate(LocalDate.of(2026, 9, 1));
+    currentStandup.setBlockers("  api is broken  ");
+    currentStandup.setSubmittedAt(
+            Instant.parse("2026-09-01T04:00:00Z"));
+
+    Blocker existingBlocker = new Blocker();
+    existingBlocker.setMemberId(10L);
+    existingBlocker.setStandupId(100L);
+    existingBlocker.setDescription("API is broken");
+    existingBlocker.setConsecutiveDays(1);
+    existingBlocker.setStatus(Blocker.Status.ACTIVE);
+
+    when(standupRepository
+            .findTopByTeamIdAndMemberIdAndStandupDateLessThanOrderByStandupDateDesc(
+                    1L, 10L, LocalDate.of(2026, 9, 1)))
+            .thenReturn(previousStandup);
+
+    when(blockerRepository
+            .findTopByMemberIdOrderByLastReportedAtDesc(10L))
+            .thenReturn(Optional.of(existingBlocker));
+
+    blockerService.processStandup(currentStandup);
+
+    verify(blockerRepository).save(existingBlocker);
+    assertEquals(2, existingBlocker.getConsecutiveDays());
+    assertEquals("api is broken", existingBlocker.getDescription());
+    assertEquals(101L, existingBlocker.getStandupId());
+}
+
 }

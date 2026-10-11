@@ -9,6 +9,7 @@ import com.example.standupbot.notification.NotificationService;
 import com.example.standupbot.notification.SlackMessageFormatter;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.repository.StandupRepository;
+import com.example.standupbot.entity.DigestLogStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -156,6 +157,9 @@ class StandUpAutomationServiceTest {
         when(digestLogService.findToday(1L, date))
                 .thenReturn(Optional.of(log));
 
+        when(log.getStatus())
+        .thenReturn(DigestLogStatus.FAILED);
+
         when(slackMessageFormatter.formatDailyDigest(digest))
                 .thenReturn("Daily Standup Digest");
 
@@ -201,6 +205,9 @@ class StandUpAutomationServiceTest {
         when(digestLogService.findToday(1L, date))
                 .thenReturn(Optional.of(log));
 
+        when(log.getStatus())
+        .thenReturn(DigestLogStatus.FAILED);
+
         when(slackMessageFormatter.formatDailyDigest(digest))
                 .thenReturn("Daily Standup Digest");
 
@@ -222,4 +229,74 @@ class StandUpAutomationServiceTest {
         verify(digestLogService, never())
                 .markSent(any(), any());
     }
+    @Test
+void processDeadline_shouldNotSendWhenDigestAlreadySent() {
+
+    LocalDate date =
+            LocalDate.of(2026, 9, 10);
+
+    DailyDigestData digest =
+            new DailyDigestData(
+                    1L,
+                    "Engineering",
+                    date,
+                    List.of(),
+                    List.of(),
+                    List.of()
+            );
+
+    DigestLog log = mock(DigestLog.class);
+
+    when(digestLogService.findToday(1L, date))
+            .thenReturn(Optional.of(log));
+
+    when(log.getStatus())
+            .thenReturn(DigestLogStatus.SENT);
+
+    when(digestLogService.createPendingDigest(team, date))
+            .thenReturn(digest);
+
+    DailyDigestData result =
+            service.processDeadline(team, date);
+
+    assertSame(digest, result);
+
+    verify(notificationService, never())
+            .sendChannelMessage(anyString(), anyString());
+}
+@Test
+void processDeadline_shouldNotSendWhenDigestIsPending() {
+
+    LocalDate date =
+            LocalDate.of(2026, 9, 10);
+
+    DailyDigestData digest =
+            new DailyDigestData(
+                    1L,
+                    "Engineering",
+                    date,
+                    List.of(),
+                    List.of(),
+                    List.of()
+            );
+
+    DigestLog log = mock(DigestLog.class);
+
+    when(digestLogService.findToday(1L, date))
+            .thenReturn(Optional.of(log));
+
+    when(log.getStatus())
+            .thenReturn(DigestLogStatus.PENDING);
+
+    when(digestLogService.createPendingDigest(team, date))
+            .thenReturn(digest);
+
+    DailyDigestData result =
+            service.processDeadline(team, date);
+
+    assertSame(digest, result);
+
+    verify(notificationService, never())
+            .sendChannelMessage(anyString(), anyString());
+}
 }

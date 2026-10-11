@@ -5,6 +5,7 @@ import com.example.standupbot.entity.DigestLog;
 import com.example.standupbot.entity.Member;
 import com.example.standupbot.entity.Standup;
 import com.example.standupbot.entity.Team;
+import com.example.standupbot.entity.DigestLogStatus;
 import com.example.standupbot.notification.NotificationService;
 import com.example.standupbot.notification.SlackMessageFormatter;
 import com.example.standupbot.repository.MemberRepository;
@@ -15,6 +16,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.Optional;
 
 @Service
 public class StandUpAutomationService {
@@ -78,9 +80,34 @@ public class StandUpAutomationService {
      * Successful delivery changes the log to SENT.
      * Failed delivery changes the log to FAILED.
      */
-    public DailyDigestData processDeadline(
+        public DailyDigestData processDeadline(
             Team team,
             LocalDate today) {
+
+        Optional<DigestLog> existingLog =
+                digestLogService.findToday(
+                        team.getId(),
+                        today
+                );
+
+        if (existingLog.isPresent()) {
+
+                DigestLog log = existingLog.get();
+
+                DailyDigestData digest =
+                        digestLogService.createPendingDigest(
+                                team,
+                                today
+                        );
+
+                if (log.getStatus() == DigestLogStatus.SENT ||
+                        log.getStatus() == DigestLogStatus.PENDING) {
+
+                return digest;
+                }
+
+                return sendDigest(team, digest, log);
+        }
 
         DailyDigestData digest =
                 digestLogService.createPendingDigest(
@@ -98,30 +125,37 @@ public class StandUpAutomationService {
                         )
                 );
 
-        String message =
-                slackMessageFormatter.formatDailyDigest(
-                        digest
-                );
-
-        try {
-
-            notificationService.sendChannelMessage(
-                    team.getWebhookUrl(),
-                    message
-            );
-
-            digestLogService.markSent(
-                    log,
-                    null
-            );
-
-        } catch (Exception e) {
-
-            digestLogService.markFailed(log);
-
-            throw e;
+        return sendDigest(team, digest, log);
         }
+        private DailyDigestData sendDigest(
+        Team team,
+        DailyDigestData digest,
+        DigestLog log) {
 
-        return digest;
+    String message =
+            slackMessageFormatter.formatDailyDigest(
+                    digest
+            );
+
+    try {
+
+        notificationService.sendChannelMessage(
+                team.getWebhookUrl(),
+                message
+        );
+
+        digestLogService.markSent(
+                log,
+                null
+        );
+
+    } catch (Exception e) {
+
+        digestLogService.markFailed(log);
+
+        throw e;
     }
+
+    return digest;
+}
 }

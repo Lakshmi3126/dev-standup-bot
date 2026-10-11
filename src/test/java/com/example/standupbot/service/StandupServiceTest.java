@@ -43,6 +43,9 @@ class StandupServiceTest {
     @Mock
     private LateSubmissionService lateSubmissionService;
 
+    @Mock
+private BlockerService blockerService;
+
     private Clock clock;
     private StandupService standupService;
 
@@ -58,7 +61,8 @@ class StandupServiceTest {
                 teamRepository,
                 memberRepository,
                 clock,
-                lateSubmissionService);
+                lateSubmissionService,
+                blockerService);
     }
 
     @Test
@@ -101,6 +105,7 @@ class StandupServiceTest {
                 response.submittedAt());
 
         verify(standupRepository).saveAndFlush(any(Standup.class));
+        verify(blockerService).processStandup(any(Standup.class));
     }
 
     @Test
@@ -115,7 +120,8 @@ class StandupServiceTest {
                 teamRepository,
                 memberRepository,
                 clock,
-                lateSubmissionService);
+                lateSubmissionService,
+blockerService);
 
         Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
         Member member = createMember(10L, team);
@@ -256,7 +262,8 @@ class StandupServiceTest {
                 teamRepository,
                 memberRepository,
                 clock,
-                lateSubmissionService);
+                lateSubmissionService,
+blockerService);
 
         Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
         Member member = createMember(10L, team);
@@ -299,7 +306,8 @@ class StandupServiceTest {
                 teamRepository,
                 memberRepository,
                 clock,
-                lateSubmissionService);
+                lateSubmissionService,
+blockerService);
 
         Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
         Member member = createMember(10L, team);
@@ -426,7 +434,8 @@ class StandupServiceTest {
                 teamRepository,
                 memberRepository,
                 clock,
-                lateSubmissionService);
+                lateSubmissionService,
+blockerService);
 
         Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
 
@@ -473,7 +482,8 @@ void shouldNotRollbackStandupWhenLateSubmissionNotificationFails() {
             teamRepository,
             memberRepository,
             clock,
-            lateSubmissionService);
+            lateSubmissionService,
+blockerService);
 
     Team team =
             createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
@@ -527,4 +537,55 @@ void shouldNotRollbackStandupWhenLateSubmissionNotificationFails() {
                     team,
                     LocalDate.of(2026, 8, 31));
 }
+
+@Test
+    void shouldContinueSubmissionWhenBlockerNotificationFails() {
+        Team team = createTeam(1L, "Asia/Kolkata", LocalTime.of(10, 0));
+        Member member = createMember(10L, team);
+
+        SubmitStandupRequest request = new SubmitStandupRequest(
+                10L,
+                "Completed login API",
+                "Work on authentication",
+                "None");
+
+        when(teamRepository.findById(1L)).thenReturn(Optional.of(team));
+        when(memberRepository.findById(10L)).thenReturn(Optional.of(member));
+        when(standupRepository
+                .existsByTeamIdAndMemberIdAndStandupDate(
+                        1L, 10L, LocalDate.of(2026, 8, 31)))
+                .thenReturn(false);
+
+        when(standupRepository.saveAndFlush(any(Standup.class)))
+                .thenAnswer(invocation -> {
+                    Standup standup = invocation.getArgument(0);
+                    standup.setId(100L);
+                    return standup;
+                });
+
+        doThrow(new SlackDeliveryException("Slack failed"))
+        .when(blockerService)
+        .processStandup(any(Standup.class));
+
+        StandupResponse response =
+                standupService.submitStandup(1L, request);
+
+        assertNotNull(response);
+assertEquals(100L, response.id());
+
+
+        assertEquals(100L, response.id());
+        assertEquals(1L, response.teamId());
+        assertEquals(10L, response.memberId());
+        assertEquals(
+                LocalDate.of(2026, 8, 31),
+                response.standupDate());
+        assertEquals(Standup.Status.ON_TIME, response.status());
+        assertEquals(
+                Instant.parse("2026-08-31T04:00:00Z"),
+                response.submittedAt());
+
+        verify(standupRepository).saveAndFlush(any(Standup.class));
+        verify(blockerService).processStandup(any(Standup.class));
+    }
 }

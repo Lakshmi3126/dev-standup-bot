@@ -31,19 +31,22 @@ public class StandupService {
     private final MemberRepository memberRepository;
     private final Clock clock;
     private final LateSubmissionService lateSubmissionService;
+    private final BlockerService blockerService;
 
     public StandupService(
             StandupRepository standupRepository,
             TeamRepository teamRepository,
             MemberRepository memberRepository,
             Clock clock,
-            LateSubmissionService lateSubmissionService) {
+            LateSubmissionService lateSubmissionService,
+            BlockerService blockerService) {
 
         this.standupRepository = standupRepository;
         this.teamRepository = teamRepository;
         this.memberRepository = memberRepository;
         this.clock = clock;
         this.lateSubmissionService = lateSubmissionService;
+        this.blockerService = blockerService;
     }
 
     @Transactional
@@ -98,6 +101,11 @@ public class StandupService {
 
         try {
             Standup saved = standupRepository.saveAndFlush(standup);
+            try {
+                blockerService.processStandup(saved);
+            } catch (SlackDeliveryException e) {
+                // Slack failure must not prevent standup submission.
+                }
 
             // Late submissions trigger the P3 late-submission workflow.
             if (status == Standup.Status.LATE) {

@@ -20,9 +20,12 @@ import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.time.Clock;
 
 @Component
 public class StandUpScheduler {
+
+        private final Clock clock;
 
     private static final Logger log =
             LoggerFactory.getLogger(StandUpScheduler.class);
@@ -42,12 +45,14 @@ public class StandUpScheduler {
             TeamRepository teamRepository,
             StandUpAutomationService standUpAutomationService,
             NotificationService notificationService,
-            SlackMessageFormatter slackMessageFormatter) {
+            SlackMessageFormatter slackMessageFormatter,
+            Clock clock) {
 
         this.teamRepository = teamRepository;
         this.standUpAutomationService = standUpAutomationService;
         this.notificationService = notificationService;
         this.slackMessageFormatter = slackMessageFormatter;
+         this.clock = clock;
     }
 
     @Scheduled(fixedRate = 60_000)
@@ -75,7 +80,7 @@ public class StandUpScheduler {
                 ZoneId.of(team.getTimezone());
 
         ZonedDateTime now =
-                ZonedDateTime.now(zoneId);
+                ZonedDateTime.now(clock.withZone(zoneId));
 
         LocalDate today =
                 now.toLocalDate();
@@ -188,14 +193,25 @@ public class StandUpScheduler {
          * Prevent duplicate deadline processing
          * for the same team on the same day.
          */
-        if (!processedDeadlines.add(deadlineKey)) {
-            return;
-        }
+        if (processedDeadlines.contains(deadlineKey)) {
+                return;
+                }
 
-        standUpAutomationService.processDeadline(
-                team,
-                today
-        );
+                try {
+                standUpAutomationService.processDeadline(
+                        team,
+                        today
+                );
+
+                processedDeadlines.add(deadlineKey);
+
+                } catch (Exception e) {
+                log.error(
+                        "Error processing deadline for team {}",
+                        team.getId(),
+                        e
+                );
+                }
     }
 
     /*

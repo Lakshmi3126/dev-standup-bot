@@ -20,6 +20,8 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.time.Clock;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -28,6 +30,7 @@ import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.times;
 
 @ExtendWith(MockitoExtension.class)
 class StandUpSchedulerTest {
@@ -52,11 +55,15 @@ class StandUpSchedulerTest {
     void setUp() {
 
         scheduler = new StandUpScheduler(
-                teamRepository,
-                standUpAutomationService,
-                notificationService,
-                slackMessageFormatter
-        );
+        teamRepository,
+        standUpAutomationService,
+        notificationService,
+        slackMessageFormatter,
+        Clock.fixed(
+                Instant.parse("2026-09-10T04:30:00Z"),
+                ZoneId.of("UTC")
+        )
+);
 
         team = new Team();
 
@@ -103,17 +110,18 @@ class StandUpSchedulerTest {
                 any(ReminderContent.class)
         )).thenReturn("Standup reminder");
 
-        try (MockedStatic<ZonedDateTime> mocked =
-                     mockStatic(ZonedDateTime.class)) {
+        scheduler = new StandUpScheduler(
+        teamRepository,
+        standUpAutomationService,
+        notificationService,
+        slackMessageFormatter,
+        Clock.fixed(
+                now.toInstant(),
+                ZoneId.of("UTC")
+        )
+);
 
-            mocked.when(() ->
-                    ZonedDateTime.now(
-                            ZoneId.of("Asia/Kolkata")
-                    )
-            ).thenReturn(now);
-
-            scheduler.pollTeams();
-        }
+scheduler.pollTeams();
 
         verify(standUpAutomationService)
                 .findMissingMembers(team, date);
@@ -146,18 +154,15 @@ class StandUpSchedulerTest {
                         ZoneId.of("Asia/Kolkata")
                 );
 
-        try (MockedStatic<ZonedDateTime> mocked =
-                     mockStatic(ZonedDateTime.class)) {
+        scheduler = new StandUpScheduler(
+        teamRepository,
+        standUpAutomationService,
+        notificationService,
+        slackMessageFormatter,
+        Clock.fixed(now.toInstant(), ZoneId.of("UTC"))
+);
 
-            mocked.when(() ->
-                    ZonedDateTime.now(
-                            ZoneId.of("Asia/Kolkata")
-                    )
-            ).thenReturn(now);
-
-            scheduler.pollTeams();
-        }
-
+scheduler.pollTeams();
         verify(
                 standUpAutomationService,
                 never()
@@ -192,21 +197,102 @@ class StandUpSchedulerTest {
                 date
         )).thenReturn(null);
 
-        try (MockedStatic<ZonedDateTime> mocked =
-                     mockStatic(ZonedDateTime.class)) {
+        scheduler = new StandUpScheduler(
+        teamRepository,
+        standUpAutomationService,
+        notificationService,
+        slackMessageFormatter,
+        Clock.fixed(
+                now.toInstant(),
+                ZoneId.of("UTC")
+        )
+);
 
-            mocked.when(() ->
-                    ZonedDateTime.now(
-                            ZoneId.of("Asia/Kolkata")
-                    )
-            ).thenReturn(now);
-
-            scheduler.pollTeams();
-        }
+scheduler.pollTeams();
 
         verify(standUpAutomationService)
                 .processDeadline(team, date);
     }
+
+
+@Test
+void shouldRetryDeadlineAfterProcessingFails() {
+
+    LocalDate date = LocalDate.of(2026, 9, 10);
+
+    ZonedDateTime now = ZonedDateTime.of(
+            2026, 9, 10, 10, 0, 0, 0,
+            ZoneId.of("Asia/Kolkata")
+    );
+
+    when(standUpAutomationService.processDeadline(team, date))
+            .thenThrow(new RuntimeException("Slack failed"));
+
+    scheduler = new StandUpScheduler(
+            teamRepository,
+            standUpAutomationService,
+            notificationService,
+            slackMessageFormatter,
+            Clock.fixed(now.toInstant(), ZoneId.of("UTC"))
+    );
+
+    scheduler.pollTeams();
+    scheduler.pollTeams();
+
+    verify(standUpAutomationService, times(2))
+            .processDeadline(team, date);
+}
+
+        // @Test
+        // void shouldRetryDeadlineAfterProcessingFails() {
+
+        // LocalDate date =
+        //         LocalDate.of(2026, 9, 10);
+
+        // ZonedDateTime now =
+        //         ZonedDateTime.of(
+        //                 2026,
+        //                 9,
+        //                 10,
+        //                 10,
+        //                 0,
+        //                 0,
+        //                 0,
+        //                 ZoneId.of("Asia/Kolkata")
+        //         );
+
+        // when(standUpAutomationService.processDeadline(
+        //         team,
+        //         date
+        // )).thenThrow(new RuntimeException("Slack failed"));
+
+        // try (MockedStatic<ZonedDateTime> mocked =
+        //                 mockStatic(ZonedDateTime.class)) {
+
+        //         mocked.when(() ->
+        //                 ZonedDateTime.now(
+        //                         ZoneId.of("Asia/Kolkata")
+        //                 )
+        //         ).thenReturn(now);
+
+        //         scheduler.pollTeams();
+        // }
+
+        // try (MockedStatic<ZonedDateTime> mocked =
+        //                 mockStatic(ZonedDateTime.class)) {
+
+        //         mocked.when(() ->
+        //                 ZonedDateTime.now(
+        //                         ZoneId.of("Asia/Kolkata")
+        //                 )
+        //         ).thenReturn(now);
+
+        //         scheduler.pollTeams();
+        // }
+
+        // verify(standUpAutomationService, times(2))
+        //         .processDeadline(team, date);
+        // }
 
     @Test
     void shouldNotProcessDeadlineBeforeDeadline() {
@@ -223,17 +309,15 @@ class StandUpSchedulerTest {
                         ZoneId.of("Asia/Kolkata")
                 );
 
-        try (MockedStatic<ZonedDateTime> mocked =
-                     mockStatic(ZonedDateTime.class)) {
+        scheduler = new StandUpScheduler(
+        teamRepository,
+        standUpAutomationService,
+        notificationService,
+        slackMessageFormatter,
+        Clock.fixed(now.toInstant(), ZoneId.of("UTC"))
+);
 
-            mocked.when(() ->
-                    ZonedDateTime.now(
-                            ZoneId.of("Asia/Kolkata")
-                    )
-            ).thenReturn(now);
-
-            scheduler.pollTeams();
-        }
+scheduler.pollTeams();
 
         verify(
                 standUpAutomationService,
@@ -241,56 +325,39 @@ class StandUpSchedulerTest {
         ).processDeadline(any(), any());
     }
 
-    @Test
-    void shouldSkipAutomationOnSaturday() {
+    
+@Test
+void shouldSkipAutomationOnSaturday() {
 
-        LocalDate saturday =
-                LocalDate.of(2026, 9, 12);
+    LocalDate saturday = LocalDate.of(2026, 9, 12);
 
-        assertEquals(
-                DayOfWeek.SATURDAY,
-                saturday.getDayOfWeek()
-        );
+    assertEquals(DayOfWeek.SATURDAY, saturday.getDayOfWeek());
 
-        ZonedDateTime now =
-                ZonedDateTime.of(
-                        2026,
-                        9,
-                        12,
-                        10,
-                        0,
-                        0,
-                        0,
-                        ZoneId.of("Asia/Kolkata")
-                );
+    ZonedDateTime now = ZonedDateTime.of(
+            2026, 9, 12, 10, 0, 0, 0,
+            ZoneId.of("Asia/Kolkata")
+    );
 
-        try (MockedStatic<ZonedDateTime> mocked =
-                     mockStatic(ZonedDateTime.class)) {
+    scheduler = new StandUpScheduler(
+            teamRepository,
+            standUpAutomationService,
+            notificationService,
+            slackMessageFormatter,
+            Clock.fixed(now.toInstant(), ZoneId.of("UTC"))
+    );
 
-            mocked.when(() ->
-                    ZonedDateTime.now(
-                            ZoneId.of("Asia/Kolkata")
-                    )
-            ).thenReturn(now);
+    scheduler.pollTeams();
 
-            scheduler.pollTeams();
-        }
+    verify(standUpAutomationService, never())
+            .findMissingMembers(any(), any());
 
-        verify(
-                standUpAutomationService,
-                never()
-        ).findMissingMembers(any(), any());
+    verify(standUpAutomationService, never())
+            .processDeadline(any(), any());
 
-        verify(
-                standUpAutomationService,
-                never()
-        ).processDeadline(any(), any());
+    verify(notificationService, never())
+            .sendPersonalMessage(any(), any(), any());
+}
 
-        verify(
-                notificationService,
-                never()
-        ).sendPersonalMessage(any(), any(), any());
-    }
 
     @Test
     void shouldSkipAutomationOnSunday() {
@@ -315,17 +382,15 @@ class StandUpSchedulerTest {
                         ZoneId.of("Asia/Kolkata")
                 );
 
-        try (MockedStatic<ZonedDateTime> mocked =
-                     mockStatic(ZonedDateTime.class)) {
+        scheduler = new StandUpScheduler(
+        teamRepository,
+        standUpAutomationService,
+        notificationService,
+        slackMessageFormatter,
+        Clock.fixed(now.toInstant(), ZoneId.of("UTC"))
+);
 
-            mocked.when(() ->
-                    ZonedDateTime.now(
-                            ZoneId.of("Asia/Kolkata")
-                    )
-            ).thenReturn(now);
-
-            scheduler.pollTeams();
-        }
+scheduler.pollTeams();
 
         verify(
                 standUpAutomationService,
@@ -361,17 +426,15 @@ class StandUpSchedulerTest {
                         ZoneId.of("Asia/Kolkata")
                 );
 
-        try (MockedStatic<ZonedDateTime> mocked =
-                     mockStatic(ZonedDateTime.class)) {
+        scheduler = new StandUpScheduler(
+        teamRepository,
+        standUpAutomationService,
+        notificationService,
+        slackMessageFormatter,
+        Clock.fixed(now.toInstant(), ZoneId.of("UTC"))
+);
 
-            mocked.when(() ->
-                    ZonedDateTime.now(
-                            ZoneId.of("Asia/Kolkata")
-                    )
-            ).thenReturn(now);
-
-            scheduler.pollTeams();
-        }
+scheduler.pollTeams();
 
         verify(teamRepository)
                 .findByActiveTrue();
@@ -380,45 +443,36 @@ class StandUpSchedulerTest {
                 .findAll();
     }
 
-    @Test
-    void shouldUseTeamTimezone() {
+    
+@Test
+void shouldUseTeamTimezone() {
 
-        LocalDate date =
-                LocalDate.of(2026, 9, 10);
+    LocalDate date = LocalDate.of(2026, 9, 10);
 
-        team.setTimezone("America/New_York");
-        team.setDeadline(LocalTime.of(10, 0));
+    team.setTimezone("America/New_York");
+    team.setDeadline(LocalTime.of(10, 0));
 
-        ZonedDateTime now =
-                ZonedDateTime.of(
-                        2026,
-                        9,
-                        10,
-                        9,
-                        50,
-                        0,
-                        0,
-                        ZoneId.of("America/New_York")
-                );
+    ZonedDateTime now = ZonedDateTime.of(
+            2026, 9, 10, 9, 50, 0, 0,
+            ZoneId.of("America/New_York")
+    );
 
-        when(standUpAutomationService.findMissingMembers(
-                team,
-                date
-        )).thenReturn(List.of());
+    when(standUpAutomationService.findMissingMembers(
+            team, date
+    )).thenReturn(List.of());
 
-        try (MockedStatic<ZonedDateTime> mocked =
-                     mockStatic(ZonedDateTime.class)) {
+    scheduler = new StandUpScheduler(
+            teamRepository,
+            standUpAutomationService,
+            notificationService,
+            slackMessageFormatter,
+            Clock.fixed(now.toInstant(), ZoneId.of("UTC"))
+    );
 
-            mocked.when(() ->
-                    ZonedDateTime.now(
-                            ZoneId.of("America/New_York")
-                    )
-            ).thenReturn(now);
+    scheduler.pollTeams();
 
-            scheduler.pollTeams();
-        }
+    verify(standUpAutomationService)
+            .findMissingMembers(team, date);
+}
 
-        verify(standUpAutomationService)
-                .findMissingMembers(team, date);
-    }
 }

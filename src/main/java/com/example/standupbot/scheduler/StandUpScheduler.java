@@ -14,13 +14,13 @@ import org.springframework.stereotype.Component;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.Clock;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.time.Clock;
 
 @Component
 public class StandUpScheduler {
@@ -35,10 +35,9 @@ public class StandUpScheduler {
     private final NotificationService notificationService;
     private final SlackMessageFormatter slackMessageFormatter;
 
-    private final Set<String> processedReminders =
-            ConcurrentHashMap.newKeySet();
-
-    private final Set<String> processedDeadlines =
+    // Track successful (or intentionally skipped) recipients individually.
+    // A failed recipient remains eligible for the next scheduler poll.
+    private final Set<String> processedReminderRecipients =
             ConcurrentHashMap.newKeySet();
 
     public StandUpScheduler(
@@ -52,7 +51,7 @@ public class StandUpScheduler {
         this.standUpAutomationService = standUpAutomationService;
         this.notificationService = notificationService;
         this.slackMessageFormatter = slackMessageFormatter;
-         this.clock = clock;
+        this.clock = clock;
     }
 
     @Scheduled(fixedRate = 60_000)
@@ -100,37 +99,27 @@ public class StandUpScheduler {
                 team.getDeadline();
 
         /*
-         * Reminder should run only during the
-         * single 1-minute scheduler tick that
-         * starts exactly 10 minutes before deadline.
+         * Start reminders 10 minutes before the deadline.
+         * Failed recipients remain eligible for retry until the deadline.
          */
         LocalTime reminderStart =
                 deadline.minusMinutes(10);
 
-        LocalTime reminderEnd =
-                reminderStart.plusMinutes(1);
-
+        // Keep checking until the deadline so a failed DM can be retried
+        // by the next poll without resending to members already notified.
         boolean insideReminderWindow =
                 !currentTime.isBefore(reminderStart)
-                        && currentTime.isBefore(reminderEnd);
+                        && currentTime.isBefore(deadline);
 
         if (insideReminderWindow) {
             processReminder(team, today);
         }
 
-        /*
-         * Deadline processing should run only
-         * during the single 1-minute tick starting
-         * exactly at the deadline.
-         */
-        LocalTime deadlineEnd =
-                deadline.plusMinutes(1);
+        // Keep checking after the deadline. The service skips SENT and fresh
+        // PENDING digests, but can retry FAILED or abandoned PENDING digests.
+        boolean deadlineReached = !currentTime.isBefore(deadline);
 
-        boolean insideDeadlineWindow =
-                !currentTime.isBefore(deadline)
-                        && currentTime.isBefore(deadlineEnd);
-
-        if (insideDeadlineWindow) {
+        if (deadlineReached) {
             processDeadline(team, today);
         }
     }
@@ -139,17 +128,6 @@ public class StandUpScheduler {
             Team team,
             LocalDate today) {
 
-        String reminderKey =
-                team.getId() + "-" + today;
-
-        /*
-         * Prevent duplicate reminders for the
-         * same team on the same day.
-         */
-        if (!processedReminders.add(reminderKey)) {
-            return;
-        }
-
         List<Member> missingMembers =
                 standUpAutomationService.findMissingMembers(
                         team,
@@ -157,28 +135,55 @@ public class StandUpScheduler {
                 );
 
         for (Member member : missingMembers) {
+            String recipientKey =
+                    team.getId() + "-" + today + "-" + member.getId();
 
-            if (member.getSlackUserId() == null
-                    || member.getSlackUserId().isBlank()) {
+            if (processedReminderRecipients.contains(recipientKey)) {
                 continue;
             }
 
-            ReminderContent reminderContent =
-                    new ReminderContent(
-                            member.getName(),
-                            team.getDeadline().toString()
-                    );
+            if (member.getSlackUserId() == null
+                    || member.getSlackUserId().isBlank()) {
+                log.warn(
+                        "Skipping reminder for member {} in team {}: Slack user ID is missing",
+                        member.getId(),
+                        team.getId()
+                );
+                // Missing configuration is not transient; do not retry every minute.
+                processedReminderRecipients.add(recipientKey);
+                continue;
+            }
 
-            String message =
-                    slackMessageFormatter.formatPersonalReminder(
-                            reminderContent
-                    );
+            try {
+                ReminderContent reminderContent =
+                        new ReminderContent(
+                                member.getName(),
+                                team.getDeadline().toString()
+                        );
 
-            notificationService.sendPersonalMessage(
-                    team.getSlackBotToken(),
-                    member.getSlackUserId(),
-                    message
-            );
+                String message =
+                        slackMessageFormatter.formatPersonalReminder(
+                                reminderContent
+                        );
+
+                notificationService.sendPersonalMessage(
+                        team.getSlackBotToken(),
+                        member.getSlackUserId(),
+                        message
+                );
+
+                processedReminderRecipients.add(recipientKey);
+            } catch (Exception exception) {
+                // One member's Slack failure must not block the rest of the batch.
+                // The recipient is deliberately not marked processed, so the next
+                // scheduler poll can retry while the reminder window is open.
+                log.error(
+                        "Failed to send stand-up reminder for team {} and member {}",
+                        team.getId(),
+                        member.getId(),
+                        exception
+                );
+            }
         }
     }
 
@@ -186,32 +191,22 @@ public class StandUpScheduler {
             Team team,
             LocalDate today) {
 
-        String deadlineKey =
-                team.getId() + "-" + today;
-
-        /*
-         * Prevent duplicate deadline processing
-         * for the same team on the same day.
-         */
-        if (processedDeadlines.contains(deadlineKey)) {
-                return;
-                }
-
-                try {
-                standUpAutomationService.processDeadline(
-                        team,
-                        today
-                );
-
-                processedDeadlines.add(deadlineKey);
-
-                } catch (Exception e) {
-                log.error(
-                        "Error processing deadline for team {}",
-                        team.getId(),
-                        e
-                );
-                }
+        try {
+            // The service is idempotent for SENT digests and protects fresh PENDING
+            // digests. Polling after the deadline also recovers FAILED or stale
+            // PENDING digests after transient failures or an application restart.
+            standUpAutomationService.processDeadline(
+                    team,
+                    today
+            );
+        } catch (Exception exception) {
+            log.error(
+                    "Error processing deadline for team {} on {}",
+                    team.getId(),
+                    today,
+                    exception
+            );
+        }
     }
 
     /*

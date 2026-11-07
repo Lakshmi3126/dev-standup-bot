@@ -1,22 +1,27 @@
+
 package com.example.standupbot.service;
 
-import com.example.standupbot.entity.Blocker;
-import com.example.standupbot.entity.Standup;
-import com.example.standupbot.repository.BlockerRepository;
-import com.example.standupbot.repository.StandupRepository;
-import org.springframework.stereotype.Service;
-import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.dto.BlockerResponse;
+import com.example.standupbot.entity.Blocker;
+import com.example.standupbot.entity.Member;
+import com.example.standupbot.entity.Standup;
+import com.example.standupbot.exception.ResourceNotFoundException;
+import com.example.standupbot.notification.BlockerAlertContent;
 import com.example.standupbot.notification.NotificationService;
 import com.example.standupbot.notification.SlackMessageFormatter;
-import com.example.standupbot.notification.BlockerAlertContent;
+import com.example.standupbot.repository.BlockerRepository;
+import com.example.standupbot.repository.MemberRepository;
+import com.example.standupbot.repository.StandupRepository;
+
+import org.springframework.stereotype.Service;
+
 import java.time.Clock;
-import com.example.standupbot.entity.Member;
-import java.util.ArrayList;
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
 public class BlockerService {
+
     private final BlockerRepository blockerRepository;
     private final StandupRepository standupRepository;
     private final MemberRepository memberRepository;
@@ -42,17 +47,38 @@ public class BlockerService {
 
     public void processStandup(Standup standup) {
 
-        if (standup == null || standup.getBlockers() == null
-                || standup.getBlockers().isBlank()) {
+        if (standup == null) {
             return;
         }
 
-        Standup previousStandup =
-                standupRepository
-                        .findTopByTeamIdAndMemberIdAndStandupDateLessThanOrderByStandupDateDesc(
-                                standup.getTeamId(),
-                                standup.getMemberId(),
-                                standup.getStandupDate());
+        // No blocker reported: resolve the latest active/unresolved blocker.
+        if (standup.getBlockers() == null
+                || standup.getBlockers().isBlank()) {
+
+           List<Blocker> activeBlockers = blockerRepository
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(
+                standup.getMemberId(),
+                standup.getTeamId())
+        .stream()
+        .filter(blocker ->
+                blocker.getStatus() == Blocker.Status.ACTIVE
+                || blocker.getStatus() == Blocker.Status.UNRESOLVED)
+        .toList();
+
+for (Blocker blocker : activeBlockers) {
+    blocker.setStatus(Blocker.Status.RESOLVED);
+}
+
+blockerRepository.saveAll(activeBlockers);
+
+            return;
+        }
+
+        Standup previousStandup = standupRepository
+                .findTopByTeamIdAndMemberIdAndStandupDateLessThanOrderByStandupDateDesc(
+                        standup.getTeamId(),
+                        standup.getMemberId(),
+                        standup.getStandupDate());
 
         String currentBlocker = standup.getBlockers().trim();
 
@@ -61,61 +87,37 @@ public class BlockerService {
                         && previousStandup.getBlockers() != null
                         && currentBlocker.equalsIgnoreCase(
                                 previousStandup.getBlockers().trim());
-        
+
         boolean consecutiveDay =
-        previousStandup != null
-                && isConsecutiveWorkingDay(
-                        previousStandup.getStandupDate(),
-                        standup.getStandupDate());
+                previousStandup != null
+                        && isConsecutiveWorkingDay(
+                                previousStandup.getStandupDate(),
+                                standup.getStandupDate());
 
         Blocker blocker = blockerRepository
-                .findTopByMemberIdOrderByLastReportedAtDesc(
-                        standup.getMemberId())
-                .orElse(null);
-
-        if (blocker == null) {
-            blocker = new Blocker();
-
-            blocker.setMemberId(standup.getMemberId());
-            blocker.setStandupId(standup.getId());
-            blocker.setDescription(currentBlocker);
-            blocker.setFirstReportedAt(standup.getSubmittedAt());
-            blocker.setLastReportedAt(standup.getSubmittedAt());
-            blocker.setConsecutiveDays(1);
-            blocker.setStatus(Blocker.Status.ACTIVE);
-
-            blockerRepository.save(blocker);
-
-             Member member = memberRepository
-                .findByIdAndTeamId(
+                .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(
                         standup.getMemberId(),
                         standup.getTeamId())
+                .stream()
+                .filter(existing ->
+                        existing.getStatus() != Blocker.Status.RESOLVED)
+                .findFirst()
                 .orElse(null);
 
-            if (member != null && member.getTeam() != null) {
-                BlockerAlertContent content = new BlockerAlertContent(
-                member.getTeam().getName(),
-                member.getName(),
-                currentBlocker,
-                1
-                );
-
-                String message = slackMessageFormatter.formatBlockerAlert(content);
-
-                notificationService.sendChannelMessage(
-                        member.getTeam().getWebhookUrl(),
-                        message
-                );
-            }
+        // First blocker reported.
+        if (blocker == null) {
+            createNewBlocker(standup, currentBlocker);
             return;
         }
 
+        // Same blocker reported on consecutive working days.
         if (sameAsPrevious && consecutiveDay) {
 
             blocker.setStandupId(standup.getId());
             blocker.setDescription(currentBlocker);
             blocker.setLastReportedAt(standup.getSubmittedAt());
-            blocker.setConsecutiveDays(blocker.getConsecutiveDays() + 1);
+            blocker.setConsecutiveDays(
+                    blocker.getConsecutiveDays() + 1);
 
             if (blocker.getConsecutiveDays() >= 3) {
                 blocker.setStatus(Blocker.Status.UNRESOLVED);
@@ -126,34 +128,14 @@ public class BlockerService {
             blockerRepository.save(blocker);
 
             if (blocker.getConsecutiveDays() == 3) {
-
-                Member member = memberRepository
-                        .findByIdAndTeamId(
-                                standup.getMemberId(),
-                                standup.getTeamId())
-                        .orElse(null);
-
-                if (member != null && member.getTeam() != null) {
-
-                    BlockerAlertContent content = new BlockerAlertContent(
-                            member.getTeam().getName(),
-                            member.getName(),
-                            currentBlocker,
-                            blocker.getConsecutiveDays()
-                    );
-
-                    String message =
-                            slackMessageFormatter.formatUnresolvedBlockerAlert(content);
-
-                    notificationService.sendChannelMessage(
-                            member.getTeam().getWebhookUrl(),
-                            message
-                    );
-                }
+                sendUnresolvedBlockerAlert(
+                        standup, currentBlocker, blocker);
             }
 
             return;
         }
+
+        // Different blocker or a break in consecutive working days.
         blocker.setStandupId(standup.getId());
         blocker.setDescription(currentBlocker);
         blocker.setFirstReportedAt(standup.getSubmittedAt());
@@ -162,37 +144,121 @@ public class BlockerService {
         blocker.setStatus(Blocker.Status.ACTIVE);
 
         blockerRepository.save(blocker);
+
+        // A changed blocker is a new issue and needs an immediate alert.
+        if (!sameAsPrevious) {
+            sendBlockerAlert(standup, currentBlocker);
+        }
     }
 
-    public List<BlockerResponse> getMemberBlockers(Long teamId, Long memberId) {
-        memberRepository.findByIdAndTeamId(memberId, teamId)
-                .orElseThrow(() -> new RuntimeException("Member not found"));
+    private void createNewBlocker(
+            Standup standup,
+            String currentBlocker) {
 
-        return blockerRepository.findByMemberIdOrderByLastReportedAtDesc(memberId)
+        Blocker blocker = new Blocker();
+
+        blocker.setMemberId(standup.getMemberId());
+        blocker.setStandupId(standup.getId());
+        blocker.setDescription(currentBlocker);
+        blocker.setFirstReportedAt(standup.getSubmittedAt());
+        blocker.setLastReportedAt(standup.getSubmittedAt());
+        blocker.setConsecutiveDays(1);
+        blocker.setStatus(Blocker.Status.ACTIVE);
+
+        blockerRepository.save(blocker);
+
+        sendBlockerAlert(standup, currentBlocker);
+    }
+
+    private void sendBlockerAlert(
+            Standup standup,
+            String currentBlocker) {
+
+        Member member = memberRepository
+                .findByIdAndTeamId(
+                        standup.getMemberId(),
+                        standup.getTeamId())
+                .orElse(null);
+
+        if (member == null || member.getTeam() == null) {
+            return;
+        }
+
+        BlockerAlertContent content = new BlockerAlertContent(
+                member.getTeam().getName(),
+                member.getName(),
+                currentBlocker,
+                1
+        );
+
+        String message =
+                slackMessageFormatter.formatBlockerAlert(content);
+
+        notificationService.sendChannelMessage(
+                member.getTeam().getWebhookUrl(),
+                message
+        );
+    }
+
+    private void sendUnresolvedBlockerAlert(
+            Standup standup,
+            String currentBlocker,
+            Blocker blocker) {
+
+        Member member = memberRepository
+                .findByIdAndTeamId(
+                        standup.getMemberId(),
+                        standup.getTeamId())
+                .orElse(null);
+
+        if (member == null || member.getTeam() == null) {
+            return;
+        }
+
+        BlockerAlertContent content = new BlockerAlertContent(
+                member.getTeam().getName(),
+                member.getName(),
+                currentBlocker,
+                blocker.getConsecutiveDays()
+        );
+
+        String message =
+                slackMessageFormatter.formatUnresolvedBlockerAlert(content);
+
+        notificationService.sendChannelMessage(
+                member.getTeam().getWebhookUrl(),
+                message
+        );
+    }
+
+    public List<BlockerResponse> getTeamBlockers(Long teamId) {
+
+        return blockerRepository
+                .findByTeamIdOrderByLastReportedAtDesc(teamId)
                 .stream()
                 .map(this::toResponse)
                 .toList();
     }
 
-    public List<BlockerResponse> getTeamBlockers(Long teamId) {
-        List<Member> members = memberRepository.findByTeamId(teamId);
+    public List<BlockerResponse> getMemberBlockers(
+            Long teamId,
+            Long memberId) {
 
-        List<BlockerResponse> blockers = new ArrayList<>();
+        memberRepository.findByIdAndTeamId(memberId, teamId)
+                .orElseThrow(() ->
+                        new ResourceNotFoundException("Member not found"));
 
-        for (Member member : members) {
-            blockers.addAll(
-                    blockerRepository
-                            .findByMemberIdOrderByLastReportedAtDesc(member.getId())
-                            .stream()
-                            .map(this::toResponse)
-                            .toList()
-            );
-        }
-
-        return blockers;
-    }   
+        return blockerRepository
+                .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(
+                        memberId,
+                        teamId)
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
 
     private BlockerResponse toResponse(Blocker blocker) {
+
         return new BlockerResponse(
                 blocker.getId(),
                 blocker.getMemberId(),
@@ -206,14 +272,14 @@ public class BlockerService {
     }
 
     private boolean isConsecutiveWorkingDay(
-            java.time.LocalDate previousDate,
-            java.time.LocalDate currentDate) {
+            LocalDate previousDate,
+            LocalDate currentDate) {
 
         if (previousDate == null || currentDate == null) {
             return false;
         }
 
-        java.time.LocalDate expectedDate = previousDate.plusDays(1);
+        LocalDate expectedDate = previousDate.plusDays(1);
 
         while (expectedDate.getDayOfWeek().getValue() >= 6) {
             expectedDate = expectedDate.plusDays(1);

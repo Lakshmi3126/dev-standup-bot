@@ -13,6 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.scheduling.TaskScheduler;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
@@ -62,7 +63,8 @@ class DigestDebounceServiceTest {
                 dailyDigestService,
                 digestLogService,
                 notificationService,
-                slackMessageFormatter
+                slackMessageFormatter,
+                Clock.systemUTC()
         );
 
         team = new Team();
@@ -158,7 +160,7 @@ class DigestDebounceServiceTest {
     }
 
     @Test
-    void shouldNotRecordUpdateWhenUpdatedDigestDeliveryFails() {
+    void shouldScheduleRetryWhenUpdatedDigestDeliveryFails() {
 
         DailyDigestData digest =
                 new DailyDigestData(
@@ -172,45 +174,31 @@ class DigestDebounceServiceTest {
 
         when(dailyDigestService.buildDailyDigest(team, date))
                 .thenReturn(digest);
-
         when(digestLogService.findToday(1L, date))
                 .thenReturn(Optional.of(digestLog));
-
         when(slackMessageFormatter.formatDailyDigest(digest))
                 .thenReturn("Updated digest");
-
         doThrow(new RuntimeException("Slack failed"))
                 .when(notificationService)
-                .sendChannelMessage(
-                        "webhook-url",
-                        "Updated digest"
-                );
+                .sendChannelMessage("webhook-url", "Updated digest");
 
         ArgumentCaptor<Runnable> runnableCaptor =
                 ArgumentCaptor.forClass(Runnable.class);
 
         service.scheduleUpdatedDigest(team, date);
-
         verify(taskScheduler).schedule(
                 runnableCaptor.capture(),
                 any(Instant.class)
         );
 
-        /*
-         * The scheduled task should fail because
-         * Slack delivery failed.
-         */
-        try {
-            runnableCaptor.getValue().run();
-        } catch (RuntimeException ignored) {
-            // Expected
-        }
+        // First delivery fails; a retry should be scheduled, not discarded.
+        runnableCaptor.getValue().run();
 
-        /*
-         * update_count must NOT be incremented
-         * when delivery fails.
-         */
-        verify(digestLogService, never())
-                .recordUpdate(digestLog);
+        verify(taskScheduler, times(2)).schedule(
+                any(Runnable.class),
+                any(Instant.class)
+        );
+        verify(digestLogService, never()).recordUpdate(digestLog);
     }
+
 }

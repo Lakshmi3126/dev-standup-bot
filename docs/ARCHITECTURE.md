@@ -381,6 +381,8 @@ NotificationService sends to Slack
 
 **Why the DigestLog row is written before the Slack call, not after:** if the Slack call succeeds but the subsequent database write fails, a "write-after-send" ordering leaves no record that the digest went out — the next scheduler tick could send it again. Writing a `PENDING` row first means even a mid-flight crash leaves evidence that this team/day was being processed, and the status update after the Slack call is a much smaller, more reliable operation than the full digest-generation-plus-send sequence.
 
+The scheduler continues checking the current day's digest after the configured deadline. `SENT` rows are no-ops, fresh `PENDING` rows are left alone, and `FAILED` or `PENDING` rows older than 2 minutes are eligible for recovery. This allows a failed send or an application restart to be recovered without relying on an in-memory one-time deadline flag.
+
 ---
 
 ## 16. Data Flow — Late Submission
@@ -412,7 +414,7 @@ StandupService marks LATE
 Check DigestLog for (team_id, today)
   ↓
   ├─ No row found → do nothing yet (deadline job hasn't run)
-  ├─ Row found, status = PENDING → do not send yet; the initial send is still in flight or about to run. Let the deadline job's own PENDING→SENT/FAILED transition finish first (avoid a race between the deadline job and a late-submission handler both trying to send at once)
+  ├─ Row found, status = PENDING → do not send while it is fresh; the initial send may still be in flight. If it remains PENDING for more than 2 minutes, treat it as abandoned (for example, after an application crash) and let deadline recovery retry it
   ├─ Row found, status = FAILED → treat as if no digest has been sent yet; generate and send, then transition FAILED → SENT
   └─ Row found, status = SENT → generate updated digest, send, increment update_count, set last_updated_at (repeat sends are allowed, but see §16b for debouncing)
 

@@ -5,12 +5,15 @@ import com.example.standupbot.entity.DigestLog;
 import com.example.standupbot.entity.Team;
 import com.example.standupbot.notification.NotificationService;
 import com.example.standupbot.notification.SlackMessageFormatter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
@@ -18,157 +21,239 @@ import java.util.concurrent.ScheduledFuture;
 @Service
 public class DigestDebounceService {
 
-    private static final long DEBOUNCE_MINUTES = 5;
+    private static final Logger log =
+            LoggerFactory.getLogger(DigestDebounceService.class);
 
+    private static final Duration DEBOUNCE_DELAY =
+            Duration.ofMinutes(5);
+
+    private static final int MAX_DELIVERY_ATTEMPTS = 3;
+
+    private final Clock clock;
     private final TaskScheduler taskScheduler;
     private final DailyDigestService dailyDigestService;
     private final DigestLogService digestLogService;
     private final NotificationService notificationService;
     private final SlackMessageFormatter slackMessageFormatter;
 
-    private final Map<String, ScheduledFuture<?>>
-            pendingUpdates =
+    private final Map<String, PendingUpdate> pendingUpdates =
             new ConcurrentHashMap<>();
+
+    private final Map<String, Object> updateLocks =
+        new ConcurrentHashMap<>();
+
+private Object getUpdateLock(String key) {
+    return updateLocks.computeIfAbsent(key, ignored -> new Object());
+}
 
     public DigestDebounceService(
             TaskScheduler taskScheduler,
             DailyDigestService dailyDigestService,
             DigestLogService digestLogService,
             NotificationService notificationService,
-            SlackMessageFormatter slackMessageFormatter) {
+            SlackMessageFormatter slackMessageFormatter,
+            Clock clock) {
 
         this.taskScheduler = taskScheduler;
         this.dailyDigestService = dailyDigestService;
         this.digestLogService = digestLogService;
         this.notificationService = notificationService;
         this.slackMessageFormatter = slackMessageFormatter;
+        this.clock = clock;
     }
 
-    /**
-     * Schedule an updated digest.
-     *
-     * If another late submission arrives before the
-     * 5-minute period ends, the previous task is cancelled
-     * and a new 5-minute timer starts.
-     */
-    public void scheduleUpdatedDigest(
-            Team team,
-            LocalDate date) {
+    public void scheduleUpdatedDigest(Team team, LocalDate date) {
+        String key = team.getId() + "-" + date;
 
-        String key =
-                team.getId() + "-" + date;
+        PendingUpdate pendingUpdate = new PendingUpdate();
 
-        ScheduledFuture<?> existing =
-                pendingUpdates.get(key);
+        synchronized (getUpdateLock(key)) {
+            PendingUpdate previous = pendingUpdates.put(key, pendingUpdate);
 
-        if (existing != null) {
-            existing.cancel(false);
+            if (previous != null && previous.future != null) {
+                previous.future.cancel(false);
+            }
         }
 
-        Instant executionTime =
-                Instant.now()
-                        .plus(
-                                DEBOUNCE_MINUTES,
-                                ChronoUnit.MINUTES
-                        );
-
-        ScheduledFuture<?> future =
-                taskScheduler.schedule(
-                        () -> processUpdatedDigest(
-                                team,
-                                date,
-                                key
-                        ),
-                        executionTime
-                );
-
-        pendingUpdates.put(key, future);
+        scheduleAttempt(
+                team, date, key, pendingUpdate, 1, DEBOUNCE_DELAY);
     }
 
-    /**
-     * Regenerates and sends the latest digest after
-     * the debounce period.
-     */
-    private void processUpdatedDigest(
+    private void scheduleAttempt(
             Team team,
             LocalDate date,
-            String key) {
+            String key,
+            PendingUpdate pendingUpdate,
+            int attempt,
+            Duration delay) {
 
-        try {
-
-            DailyDigestData digest =
-                    dailyDigestService.buildDailyDigest(
-                            team,
-                            date
-                    );
-
-            DigestLog log =
-                    digestLogService.findToday(
-                            team.getId(),
-                            date
-                    ).orElse(null);
-
-            if (log == null) {
+        synchronized (getUpdateLock(key)) {
+            if (pendingUpdates.get(key) != pendingUpdate) {
                 return;
             }
 
-            String message =
-                    slackMessageFormatter.formatDailyDigest(
-                            digest
-                    );
+            Instant executionTime = Instant.now(clock).plus(delay);
 
-            /*
-             * Send the updated digest through the
-             * existing P4 NotificationService.
-             */
-            notificationService.sendChannelMessage(
-                    team.getWebhookUrl(),
-                    message
+            ScheduledFuture<?> future = taskScheduler.schedule(
+                    () -> processUpdatedDigest(
+                            team, date, key, pendingUpdate, attempt),
+                    executionTime
             );
 
-            /*
-             * Increment update_count only AFTER
-             * successful Slack delivery.
-             */
-            digestLogService.recordUpdate(log);
-
-        } finally {
-
-            pendingUpdates.remove(key);
+            if (future != null) {
+                pendingUpdate.future = future;
+            } else {
+                pendingUpdates.remove(key, pendingUpdate);
+                log.error(
+                        "Could not schedule updated digest for team {} on {}",
+                        team.getId(),
+                        date
+                );
+            }
         }
     }
 
-    /**
-     * Retries a digest whose previous delivery failed.
-     */
+    private void processUpdatedDigest(
+            Team team,
+            LocalDate date,
+            String key,
+            PendingUpdate pendingUpdate,
+            int attempt) {
+
+        synchronized (getUpdateLock(key)) {
+            if (pendingUpdates.get(key) != pendingUpdate) {
+                return;
+            }
+        }
+
+        DailyDigestData digest;
+        DigestLog digestLog;
+        String message;
+
+        try {
+            digest = dailyDigestService.buildDailyDigest(team, date);
+
+            digestLog = digestLogService
+                    .findToday(team.getId(), date)
+                    .orElse(null);
+
+            if (digestLog == null) {
+                removePendingUpdate(key, pendingUpdate);
+                return;
+            }
+
+            message = slackMessageFormatter.formatDailyDigest(digest);
+
+        } catch (Exception exception) {
+            removePendingUpdate(key, pendingUpdate);
+
+            log.error(
+                    "Could not prepare updated digest for team {} on {}",
+                    team.getId(),
+                    date,
+                    exception
+            );
+            return;
+        }
+
+        synchronized (getUpdateLock(key)) {
+            if (pendingUpdates.get(key) != pendingUpdate) {
+                return;
+            }
+
+            try {
+                notificationService.sendChannelMessage(
+                        team.getWebhookUrl(),
+                        message
+                );
+
+            } catch (Exception exception) {
+
+                if (attempt < MAX_DELIVERY_ATTEMPTS) {
+                    Duration retryDelay = Duration.ofMinutes(attempt);
+
+                    log.warn(
+                            "Updated digest delivery failed for team {} on {}; retrying attempt {} of {}",
+                            team.getId(),
+                            date,
+                            attempt + 1,
+                            MAX_DELIVERY_ATTEMPTS,
+                            exception
+                    );
+
+                    scheduleAttempt(
+                            team,
+                            date,
+                            key,
+                            pendingUpdate,
+                            attempt + 1,
+                            retryDelay
+                    );
+
+                } else {
+                    pendingUpdates.remove(key, pendingUpdate);
+
+                    log.error(
+                            "Updated digest delivery exhausted retries for team {} on {}",
+                            team.getId(),
+                            date,
+                            exception
+                    );
+                }
+
+                return;
+            }
+
+            try {
+                digestLogService.recordUpdate(digestLog);
+
+            } catch (Exception exception) {
+                log.error(
+                        "Slack accepted updated digest for team {} on {}, but update tracking failed",
+                        team.getId(),
+                        date,
+                        exception
+                );
+
+            } finally {
+                pendingUpdates.remove(key, pendingUpdate);
+            }
+        }
+    }
+
+    private void removePendingUpdate(
+            String key,
+            PendingUpdate pendingUpdate) {
+
+        synchronized (getUpdateLock(key)) {
+            pendingUpdates.remove(key, pendingUpdate);
+        }
+    }
+
     public void sendFailedDigest(
             Team team,
             LocalDate date,
             DailyDigestData digest,
-            DigestLog log) {
+            DigestLog logEntry) {
 
         String message =
-                slackMessageFormatter.formatDailyDigest(
-                        digest
-                );
+                slackMessageFormatter.formatDailyDigest(digest);
 
         try {
-
             notificationService.sendChannelMessage(
                     team.getWebhookUrl(),
                     message
             );
 
-            digestLogService.markSent(
-                    log,
-                    null
-            );
+            digestLogService.markSent(logEntry, null);
 
-        } catch (Exception e) {
-
-            digestLogService.markFailed(log);
-
-            throw e;
+        } catch (Exception exception) {
+            digestLogService.markFailed(logEntry);
+            throw exception;
         }
+    }
+
+    private static class PendingUpdate {
+        private ScheduledFuture<?> future;
     }
 }

@@ -1,7 +1,9 @@
+
 package com.example.standupbot.service;
 
 import com.example.standupbot.dto.DailyDigestData;
 import com.example.standupbot.entity.DigestLog;
+import com.example.standupbot.entity.DigestLogStatus;
 import com.example.standupbot.entity.Member;
 import com.example.standupbot.entity.Standup;
 import com.example.standupbot.entity.Team;
@@ -9,14 +11,15 @@ import com.example.standupbot.notification.NotificationService;
 import com.example.standupbot.notification.SlackMessageFormatter;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.repository.StandupRepository;
-import com.example.standupbot.entity.DigestLogStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Clock;
 import java.time.LocalDate;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -42,7 +45,6 @@ class StandUpAutomationServiceTest {
     private SlackMessageFormatter slackMessageFormatter;
 
     private StandUpAutomationService service;
-
     private Team team;
 
     @BeforeEach
@@ -52,7 +54,11 @@ class StandUpAutomationServiceTest {
                 standupRepository,
                 digestLogService,
                 notificationService,
-                slackMessageFormatter
+                slackMessageFormatter,
+                Clock.fixed(
+                        Instant.parse("2026-09-10T04:30:00Z"),
+                        java.time.ZoneOffset.UTC
+                )
         );
 
         team = new Team();
@@ -63,7 +69,6 @@ class StandUpAutomationServiceTest {
 
     @Test
     void findMissingMembers_shouldReturnMembersWhoDidNotSubmit() {
-
         Member alice = new Member();
         alice.setId(1L);
         alice.setName("Alice");
@@ -74,22 +79,20 @@ class StandUpAutomationServiceTest {
 
         Standup aliceStandup = new Standup();
         aliceStandup.setMemberId(1L);
-        aliceStandup.setSubmittedAt(java.time.Instant.now());
+        aliceStandup.setSubmittedAt(Instant.now());
+
+        LocalDate date = LocalDate.of(2026, 9, 10);
 
         when(memberRepository.findByTeamId(1L))
                 .thenReturn(List.of(alice, bob));
 
         when(standupRepository
                 .findByTeamIdAndStandupDateOrderByStandupDateAsc(
-                        eq(1L),
-                        any(LocalDate.class)))
+                        1L, date))
                 .thenReturn(List.of(aliceStandup));
 
         List<Member> result =
-                service.findMissingMembers(
-                        team,
-                        LocalDate.of(2026, 9, 10)
-                );
+                service.findMissingMembers(team, date);
 
         assertEquals(1, result.size());
         assertEquals(2L, result.get(0).getId());
@@ -98,7 +101,6 @@ class StandUpAutomationServiceTest {
 
     @Test
     void findMissingMembers_shouldReturnEmptyWhenEveryoneSubmitted() {
-
         Member alice = new Member();
         alice.setId(1L);
         alice.setName("Alice");
@@ -109,56 +111,69 @@ class StandUpAutomationServiceTest {
 
         Standup aliceStandup = new Standup();
         aliceStandup.setMemberId(1L);
-        aliceStandup.setSubmittedAt(java.time.Instant.now());
+        aliceStandup.setSubmittedAt(Instant.now());
 
         Standup bobStandup = new Standup();
         bobStandup.setMemberId(2L);
-        bobStandup.setSubmittedAt(java.time.Instant.now());
+        bobStandup.setSubmittedAt(Instant.now());
+
+        LocalDate date = LocalDate.of(2026, 9, 10);
 
         when(memberRepository.findByTeamId(1L))
                 .thenReturn(List.of(alice, bob));
 
         when(standupRepository
                 .findByTeamIdAndStandupDateOrderByStandupDateAsc(
-                        eq(1L),
-                        any(LocalDate.class)))
+                        1L, date))
                 .thenReturn(List.of(aliceStandup, bobStandup));
 
         List<Member> result =
-                service.findMissingMembers(
-                        team,
-                        LocalDate.of(2026, 9, 10)
-                );
+                service.findMissingMembers(team, date);
 
         assertTrue(result.isEmpty());
     }
 
     @Test
-    void processDeadline_shouldSendDigestAndMarkSent() {
-
-        LocalDate date =
-                LocalDate.of(2026, 9, 10);
-
-        DailyDigestData digest =
-                new DailyDigestData(
-                        1L,
-                        "Engineering",
-                        date,
-                        List.of(),
-                        List.of(),
-                        List.of("Bob")
-                );
-
+    void processDeadline_shouldRecoverStalePendingDigest() {
+        LocalDate date = LocalDate.of(2026, 9, 10);
+        DailyDigestData digest = createDigest(date);
         DigestLog log = mock(DigestLog.class);
 
+        when(digestLogService.findToday(1L, date))
+                .thenReturn(Optional.of(log));
+        when(log.getStatus()).thenReturn(DigestLogStatus.PENDING);
+        when(log.getCreatedAt())
+                .thenReturn(Instant.parse("2026-09-10T04:20:00Z"));
         when(digestLogService.createPendingDigest(team, date))
                 .thenReturn(digest);
+        when(slackMessageFormatter.formatDailyDigest(digest))
+                .thenReturn("Daily Standup Digest");
+
+        DailyDigestData result = service.processDeadline(team, date);
+
+        assertSame(digest, result);
+        verify(notificationService).sendChannelMessage(
+                "webhook-url",
+                "Daily Standup Digest"
+        );
+        verify(digestLogService).markSent(log, null);
+    }
+
+    @Test
+    void processDeadline_shouldSendDigestAndMarkSent() {
+        LocalDate date = LocalDate.of(2026, 9, 10);
+        DailyDigestData digest = createDigest(date, "Bob");
+
+        DigestLog log = mock(DigestLog.class);
 
         when(digestLogService.findToday(1L, date))
                 .thenReturn(Optional.of(log));
 
         when(log.getStatus())
-        .thenReturn(DigestLogStatus.FAILED);
+                .thenReturn(DigestLogStatus.FAILED);
+
+        when(digestLogService.createPendingDigest(team, date))
+                .thenReturn(digest);
 
         when(slackMessageFormatter.formatDailyDigest(digest))
                 .thenReturn("Daily Standup Digest");
@@ -168,45 +183,30 @@ class StandUpAutomationServiceTest {
 
         assertSame(digest, result);
 
-        verify(notificationService)
-                .sendChannelMessage(
-                        "webhook-url",
-                        "Daily Standup Digest"
-                );
+        verify(notificationService).sendChannelMessage(
+                "webhook-url",
+                "Daily Standup Digest"
+        );
 
-        verify(digestLogService)
-                .markSent(log, null);
-
-        verify(digestLogService, never())
-                .markFailed(any());
+        verify(digestLogService).markSent(log, null);
+        verify(digestLogService, never()).markFailed(any());
     }
 
     @Test
     void processDeadline_shouldMarkFailedWhenDeliveryFails() {
-
-        LocalDate date =
-                LocalDate.of(2026, 9, 10);
-
-        DailyDigestData digest =
-                new DailyDigestData(
-                        1L,
-                        "Engineering",
-                        date,
-                        List.of(),
-                        List.of(),
-                        List.of()
-                );
+        LocalDate date = LocalDate.of(2026, 9, 10);
+        DailyDigestData digest = createDigest(date);
 
         DigestLog log = mock(DigestLog.class);
-
-        when(digestLogService.createPendingDigest(team, date))
-                .thenReturn(digest);
 
         when(digestLogService.findToday(1L, date))
                 .thenReturn(Optional.of(log));
 
         when(log.getStatus())
-        .thenReturn(DigestLogStatus.FAILED);
+                .thenReturn(DigestLogStatus.FAILED);
+
+        when(digestLogService.createPendingDigest(team, date))
+                .thenReturn(digest);
 
         when(slackMessageFormatter.formatDailyDigest(digest))
                 .thenReturn("Daily Standup Digest");
@@ -223,80 +223,70 @@ class StandUpAutomationServiceTest {
                 () -> service.processDeadline(team, date)
         );
 
-        verify(digestLogService)
-                .markFailed(log);
+        verify(digestLogService).markFailed(log);
+        verify(digestLogService, never()).markSent(any(), any());
+    }
+
+    @Test
+    void processDeadline_shouldNotSendWhenDigestAlreadySent() {
+        LocalDate date = LocalDate.of(2026, 9, 10);
+        DigestLog log = mock(DigestLog.class);
+
+        when(digestLogService.findToday(1L, date))
+                .thenReturn(Optional.of(log));
+
+        when(log.getStatus())
+                .thenReturn(DigestLogStatus.SENT);
+
+        DailyDigestData result =
+                service.processDeadline(team, date);
+
+        assertNull(result);
 
         verify(digestLogService, never())
-                .markSent(any(), any());
+                .createPendingDigest(team, date);
+
+        verify(notificationService, never())
+                .sendChannelMessage(anyString(), anyString());
     }
+
     @Test
-void processDeadline_shouldNotSendWhenDigestAlreadySent() {
+    void processDeadline_shouldNotSendWhenDigestIsPending() {
+        LocalDate date = LocalDate.of(2026, 9, 10);
+        DigestLog log = mock(DigestLog.class);
 
-    LocalDate date =
-            LocalDate.of(2026, 9, 10);
+        when(digestLogService.findToday(1L, date))
+                .thenReturn(Optional.of(log));
 
-    DailyDigestData digest =
-            new DailyDigestData(
-                    1L,
-                    "Engineering",
-                    date,
-                    List.of(),
-                    List.of(),
-                    List.of()
-            );
+        when(log.getStatus())
+                .thenReturn(DigestLogStatus.PENDING);
 
-    DigestLog log = mock(DigestLog.class);
+        when(log.getCreatedAt())
+        .thenReturn(Instant.parse("2026-09-10T04:29:00Z"));
 
-    when(digestLogService.findToday(1L, date))
-            .thenReturn(Optional.of(log));
+        DailyDigestData result =
+                service.processDeadline(team, date);
 
-    when(log.getStatus())
-            .thenReturn(DigestLogStatus.SENT);
+        assertNull(result);
 
-    when(digestLogService.createPendingDigest(team, date))
-            .thenReturn(digest);
+        verify(digestLogService, never())
+                .createPendingDigest(team, date);
 
-    DailyDigestData result =
-            service.processDeadline(team, date);
+        verify(notificationService, never())
+                .sendChannelMessage(anyString(), anyString());
+    }
 
-    assertSame(digest, result);
+    private DailyDigestData createDigest(
+            LocalDate date,
+            String... missingMembers) {
 
-    verify(notificationService, never())
-            .sendChannelMessage(anyString(), anyString());
-}
-@Test
-void processDeadline_shouldNotSendWhenDigestIsPending() {
-
-    LocalDate date =
-            LocalDate.of(2026, 9, 10);
-
-    DailyDigestData digest =
-            new DailyDigestData(
-                    1L,
-                    "Engineering",
-                    date,
-                    List.of(),
-                    List.of(),
-                    List.of()
-            );
-
-    DigestLog log = mock(DigestLog.class);
-
-    when(digestLogService.findToday(1L, date))
-            .thenReturn(Optional.of(log));
-
-    when(log.getStatus())
-            .thenReturn(DigestLogStatus.PENDING);
-
-    when(digestLogService.createPendingDigest(team, date))
-            .thenReturn(digest);
-
-    DailyDigestData result =
-            service.processDeadline(team, date);
-
-    assertSame(digest, result);
-
-    verify(notificationService, never())
-            .sendChannelMessage(anyString(), anyString());
-}
+        return new DailyDigestData(
+                1L,
+                "Engineering",
+                date,
+                List.of(),
+                List.of(),
+                List.of(missingMembers)
+        );
+    }
 }

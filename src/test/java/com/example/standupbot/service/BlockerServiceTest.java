@@ -11,7 +11,7 @@ import com.example.standupbot.notification.NotificationService;
 import com.example.standupbot.notification.SlackMessageFormatter;
 import com.example.standupbot.notification.BlockerAlertContent;
 import com.example.standupbot.dto.BlockerResponse;
-
+import com.example.standupbot.exception.ResourceNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import static org.mockito.Mockito.never;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -28,6 +29,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @ExtendWith(MockitoExtension.class)
 class BlockerServiceTest {
@@ -83,8 +85,8 @@ class BlockerServiceTest {
                 .thenReturn(null);
 
         when(blockerRepository
-                .findTopByMemberIdOrderByLastReportedAtDesc(10L))
-                .thenReturn(Optional.empty());
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+        .thenReturn(List.of());
 
         blockerService.processStandup(standup);
 
@@ -130,8 +132,8 @@ class BlockerServiceTest {
                 .thenReturn(null);
 
         when(blockerRepository
-                .findTopByMemberIdOrderByLastReportedAtDesc(10L))
-                .thenReturn(Optional.empty());
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+        .thenReturn(List.of());
 
         when(memberRepository.findByIdAndTeamId(10L, 1L))
                 .thenReturn(Optional.of(member));
@@ -188,8 +190,8 @@ class BlockerServiceTest {
                 .thenReturn(previousStandup);
 
         when(blockerRepository
-                .findTopByMemberIdOrderByLastReportedAtDesc(10L))
-                .thenReturn(Optional.of(existingBlocker));
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+        .thenReturn(List.of(existingBlocker));
 
         blockerService.processStandup(currentStandup);
 
@@ -235,8 +237,8 @@ class BlockerServiceTest {
                 .thenReturn(previousStandup);
 
         when(blockerRepository
-                .findTopByMemberIdOrderByLastReportedAtDesc(10L))
-                .thenReturn(Optional.of(existingBlocker));
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+        .thenReturn(List.of(existingBlocker));
 
         blockerService.processStandup(currentStandup);
 
@@ -301,8 +303,8 @@ class BlockerServiceTest {
                 .thenReturn(previousStandup);
 
         when(blockerRepository
-                .findTopByMemberIdOrderByLastReportedAtDesc(10L))
-                .thenReturn(Optional.of(existingBlocker));
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+        .thenReturn(List.of(existingBlocker));
 
         when(memberRepository.findByIdAndTeamId(10L, 1L))
                 .thenReturn(Optional.of(member));
@@ -370,8 +372,8 @@ class BlockerServiceTest {
                 .thenReturn(previousStandup);
 
         when(blockerRepository
-                .findTopByMemberIdOrderByLastReportedAtDesc(10L))
-                .thenReturn(Optional.of(existingBlocker));
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+        .thenReturn(List.of(existingBlocker));
 
         blockerService.processStandup(currentStandup);
 
@@ -415,8 +417,8 @@ class BlockerServiceTest {
                 .thenReturn(previousStandup);
 
         when(blockerRepository
-                .findTopByMemberIdOrderByLastReportedAtDesc(10L))
-                .thenReturn(Optional.of(existingBlocker));
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+        .thenReturn(List.of(existingBlocker));
 
         blockerService.processStandup(currentStandup);
 
@@ -448,8 +450,8 @@ class BlockerServiceTest {
                 .thenReturn(Optional.of(member));
 
         when(blockerRepository
-                .findByMemberIdOrderByLastReportedAtDesc(10L))
-                .thenReturn(List.of(blocker));
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+        .thenReturn(List.of(blocker));
 
         List<BlockerResponse> result =
                 blockerService.getMemberBlockers(1L, 10L);
@@ -500,17 +502,10 @@ class BlockerServiceTest {
                 Instant.parse("2026-09-03T04:00:00Z"));
         blocker2.setConsecutiveDays(1);
         blocker2.setStatus(Blocker.Status.ACTIVE);
+when(blockerRepository
+        .findByTeamIdOrderByLastReportedAtDesc(1L))
+        .thenReturn(List.of(blocker1, blocker2));
 
-        when(memberRepository.findByTeamId(1L))
-                .thenReturn(List.of(member1, member2));
-
-        when(blockerRepository
-                .findByMemberIdOrderByLastReportedAtDesc(10L))
-                .thenReturn(List.of(blocker1));
-
-        when(blockerRepository
-                .findByMemberIdOrderByLastReportedAtDesc(20L))
-                .thenReturn(List.of(blocker2));
 
         List<BlockerResponse> result =
                 blockerService.getTeamBlockers(1L);
@@ -552,8 +547,8 @@ void shouldIgnoreLeadingAndTrailingWhitespaceWhenMatchingBlocker() {
             .thenReturn(previousStandup);
 
     when(blockerRepository
-            .findTopByMemberIdOrderByLastReportedAtDesc(10L))
-            .thenReturn(Optional.of(existingBlocker));
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+        .thenReturn(List.of(existingBlocker));
 
     blockerService.processStandup(currentStandup);
 
@@ -561,6 +556,163 @@ void shouldIgnoreLeadingAndTrailingWhitespaceWhenMatchingBlocker() {
     assertEquals(2, existingBlocker.getConsecutiveDays());
     assertEquals("api is broken", existingBlocker.getDescription());
     assertEquals(101L, existingBlocker.getStandupId());
+}
+
+@Test
+void shouldResolveActiveBlockerWhenStandupHasNoBlocker() {
+    Standup standup = new Standup();
+    standup.setId(102L);
+    standup.setTeamId(1L);
+    standup.setMemberId(10L);
+    standup.setStandupDate(LocalDate.of(2026, 9, 1));
+    standup.setBlockers("   ");
+
+    Blocker activeBlocker = new Blocker();
+    activeBlocker.setMemberId(10L);
+    activeBlocker.setStandupId(101L);
+    activeBlocker.setDescription("API is broken");
+    activeBlocker.setConsecutiveDays(2);
+    activeBlocker.setStatus(Blocker.Status.ACTIVE);
+
+    when(blockerRepository
+        .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+        .thenReturn(List.of(activeBlocker));
+
+    blockerService.processStandup(standup);
+
+    assertEquals(Blocker.Status.RESOLVED, activeBlocker.getStatus());
+    verify(blockerRepository).saveAll(List.of(activeBlocker));
+    verifyNoInteractions(notificationService);
+}
+
+@Test
+void shouldNotResolveBlockerFromAnotherTeam() {
+    // A standup submitted by a member of Team A, without a blocker.
+    Standup standup = new Standup();
+    standup.setId(200L);
+    standup.setTeamId(1L);
+    standup.setMemberId(10L);
+    standup.setStandupDate(LocalDate.of(2026, 9, 1));
+    standup.setBlockers("");
+
+    // The team-filtered repository returns no blockers for Team A.
+    // A blocker belonging to Team B must not be returned here.
+    when(blockerRepository
+            .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+            .thenReturn(List.of());
+
+    blockerService.processStandup(standup);
+
+    // Nothing should be resolved or saved.
+    verify(blockerRepository, never()).save(any(Blocker.class));
+}
+@Test
+void shouldSendNewAlertWhenBlockerChanges() {
+
+    Standup previousStandup = new Standup();
+    previousStandup.setStandupDate(LocalDate.of(2026, 8, 31));
+    previousStandup.setBlockers("API is broken");
+
+    Standup currentStandup = new Standup();
+    currentStandup.setId(101L);
+    currentStandup.setTeamId(1L);
+    currentStandup.setMemberId(10L);
+    currentStandup.setStandupDate(LocalDate.of(2026, 9, 1));
+    currentStandup.setBlockers("Database is down");
+    currentStandup.setSubmittedAt(
+            Instant.parse("2026-09-01T04:00:00Z"));
+
+    Blocker existingBlocker = new Blocker();
+    existingBlocker.setMemberId(10L);
+    existingBlocker.setDescription("API is broken");
+    existingBlocker.setConsecutiveDays(2);
+    existingBlocker.setStatus(Blocker.Status.ACTIVE);
+
+    Team team = new Team();
+    team.setName("Development Team");
+    team.setWebhookUrl("https://example.com/webhook");
+
+    Member member = new Member();
+    member.setId(10L);
+    member.setName("Lakshmi");
+    member.setTeam(team);
+
+    when(standupRepository
+            .findTopByTeamIdAndMemberIdAndStandupDateLessThanOrderByStandupDateDesc(
+                    1L, 10L, LocalDate.of(2026, 9, 1)))
+            .thenReturn(previousStandup);
+
+    when(blockerRepository
+            .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+            .thenReturn(List.of(existingBlocker));
+
+    when(memberRepository.findByIdAndTeamId(10L, 1L))
+            .thenReturn(Optional.of(member));
+
+    when(slackMessageFormatter.formatBlockerAlert(
+            any(BlockerAlertContent.class)))
+            .thenReturn("New blocker alert");
+
+    blockerService.processStandup(currentStandup);
+
+    assertEquals("Database is down", existingBlocker.getDescription());
+    assertEquals(1, existingBlocker.getConsecutiveDays());
+
+    verify(blockerRepository).save(existingBlocker);
+
+    verify(notificationService).sendChannelMessage(
+            "https://example.com/webhook",
+            "New blocker alert");
+}
+@Test
+void shouldResolveAllActiveAndUnresolvedBlockersWhenNoBlockerIsReported() {
+
+    Standup standup = new Standup();
+    standup.setTeamId(1L);
+    standup.setMemberId(10L);
+    standup.setBlockers("");
+
+    Blocker activeBlocker = new Blocker();
+    activeBlocker.setStatus(Blocker.Status.ACTIVE);
+
+    Blocker unresolvedBlocker = new Blocker();
+    unresolvedBlocker.setStatus(Blocker.Status.UNRESOLVED);
+
+    Blocker resolvedBlocker = new Blocker();
+    resolvedBlocker.setStatus(Blocker.Status.RESOLVED);
+
+    when(blockerRepository
+            .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(10L, 1L))
+            .thenReturn(List.of(
+                    activeBlocker,
+                    unresolvedBlocker,
+                    resolvedBlocker
+            ));
+
+    blockerService.processStandup(standup);
+
+    assertEquals(Blocker.Status.RESOLVED, activeBlocker.getStatus());
+    assertEquals(Blocker.Status.RESOLVED, unresolvedBlocker.getStatus());
+    assertEquals(Blocker.Status.RESOLVED, resolvedBlocker.getStatus());
+
+    verify(blockerRepository).saveAll(List.of(
+            activeBlocker,
+            unresolvedBlocker
+    ));
+}
+@Test
+void shouldThrowResourceNotFoundExceptionForMissingMember() {
+
+    when(memberRepository.findByIdAndTeamId(99L, 1L))
+            .thenReturn(Optional.empty());
+
+    assertThrows(
+            ResourceNotFoundException.class,
+            () -> blockerService.getMemberBlockers(1L, 99L));
+
+    verify(blockerRepository, never())
+            .findByMemberIdAndTeamIdOrderByLastReportedAtDesc(
+                    99L, 1L);
 }
 
 }

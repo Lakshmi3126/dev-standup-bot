@@ -94,8 +94,8 @@ Every unmapped exception must still be caught by a catch-all handler and returne
 ### 5.4 Notifications & Blockers (Person 4)
 
 - Slack webhook or bot-token call failures → `SlackDeliveryException`, logged with the team ID and digest date. Do not let a Slack failure roll back the already-stored standup/digest data — the data is durable in Postgres regardless of whether Slack delivery succeeded.
-- Consider a retry-with-backoff (e.g., 3 attempts) for transient Slack failures before giving up and logging.
-- If personal reminder delivery fails for one member (e.g., missing `slack_user_id`, see DATABASE_SCHEMA.md §4), skip that member and continue the batch — do not fail the entire reminder job.
+- Retry transient Slack failures with bounded backoff where a scheduled retry is available. Updated digest delivery uses up to 3 total attempts (initial attempt, then 1-minute and 2-minute delays). Initial digest delivery is retried by the deadline poller while the log is `FAILED`; an abandoned `PENDING` row older than 2 minutes is also eligible for recovery.
+- Personal reminders are processed independently per member. If one delivery fails, continue the batch; retry only that member on the next scheduler poll until the deadline. If a member has no `slack_user_id`, skip that member and continue the batch.
 
 ---
 

@@ -139,6 +139,78 @@ scheduler.pollTeams();
                 );
     }
 
+
+    @Test
+    void shouldContinueReminderBatchWhenOneMemberDeliveryFails() {
+        LocalDate date = LocalDate.of(2026, 9, 10);
+        Member alice = new Member();
+        alice.setId(1L);
+        alice.setName("Alice");
+        alice.setSlackUserId("U1");
+
+        Member bob = new Member();
+        bob.setId(2L);
+        bob.setName("Bob");
+        bob.setSlackUserId("U2");
+
+        when(standUpAutomationService.findMissingMembers(team, date))
+                .thenReturn(List.of(alice, bob));
+        when(slackMessageFormatter.formatPersonalReminder(any(ReminderContent.class)))
+                .thenReturn("Reminder");
+        org.mockito.Mockito.doThrow(new RuntimeException("Slack unavailable"))
+                .doNothing()
+                .when(notificationService)
+                .sendPersonalMessage("bot-token", "U1", "Reminder");
+
+        ZonedDateTime now = ZonedDateTime.of(
+                2026, 9, 10, 9, 50, 0, 0, ZoneId.of("Asia/Kolkata"));
+        scheduler = new StandUpScheduler(
+                teamRepository,
+                standUpAutomationService,
+                notificationService,
+                slackMessageFormatter,
+                Clock.fixed(now.toInstant(), ZoneId.of("UTC"))
+        );
+
+        scheduler.pollTeams();
+
+        verify(notificationService).sendPersonalMessage("bot-token", "U2", "Reminder");
+    }
+
+    @Test
+    void shouldRetryOnlyFailedReminderOnNextPollBeforeDeadline() {
+        LocalDate date = LocalDate.of(2026, 9, 10);
+        Member alice = new Member();
+        alice.setId(1L);
+        alice.setName("Alice");
+        alice.setSlackUserId("U1");
+
+        when(standUpAutomationService.findMissingMembers(team, date))
+                .thenReturn(List.of(alice));
+        when(slackMessageFormatter.formatPersonalReminder(any(ReminderContent.class)))
+                .thenReturn("Reminder");
+        org.mockito.Mockito.doThrow(new RuntimeException("temporary failure"))
+                .doNothing()
+                .when(notificationService)
+                .sendPersonalMessage("bot-token", "U1", "Reminder");
+
+        ZonedDateTime firstPoll = ZonedDateTime.of(
+                2026, 9, 10, 9, 50, 0, 0, ZoneId.of("Asia/Kolkata"));
+        scheduler = new StandUpScheduler(
+                teamRepository,
+                standUpAutomationService,
+                notificationService,
+                slackMessageFormatter,
+                Clock.fixed(firstPoll.toInstant(), ZoneId.of("UTC"))
+        );
+
+        scheduler.pollTeams();
+        scheduler.pollTeams();
+
+        verify(notificationService, times(2))
+                .sendPersonalMessage("bot-token", "U1", "Reminder");
+    }
+
     @Test
     void shouldNotProcessReminderOutsideReminderWindow() {
 
@@ -172,6 +244,27 @@ scheduler.pollTeams();
                 notificationService,
                 never()
         ).sendPersonalMessage(any(), any(), any());
+    }
+
+    @Test
+    void shouldContinueCheckingDeadlineAfterDeadlineForRecovery() {
+        LocalDate date = LocalDate.of(2026, 9, 10);
+        ZonedDateTime now = ZonedDateTime.of(
+                2026, 9, 10, 11, 30, 0, 0,
+                ZoneId.of("Asia/Kolkata")
+        );
+
+        scheduler = new StandUpScheduler(
+                teamRepository,
+                standUpAutomationService,
+                notificationService,
+                slackMessageFormatter,
+                Clock.fixed(now.toInstant(), ZoneId.of("UTC"))
+        );
+
+        scheduler.pollTeams();
+
+        verify(standUpAutomationService).processDeadline(team, date);
     }
 
     @Test
@@ -474,5 +567,38 @@ void shouldUseTeamTimezone() {
     verify(standUpAutomationService)
             .findMissingMembers(team, date);
 }
+@Test
+void shouldNotRepeatSuccessfulReminderOnNextPoll() {
+    LocalDate date = LocalDate.of(2026, 9, 10);
 
+    Member alice = new Member();
+    alice.setId(1L);
+    alice.setName("Alice");
+    alice.setSlackUserId("U1");
+
+    when(standUpAutomationService.findMissingMembers(team, date))
+            .thenReturn(List.of(alice));
+
+    when(slackMessageFormatter.formatPersonalReminder(any(ReminderContent.class)))
+            .thenReturn("Reminder");
+
+    ZonedDateTime now = ZonedDateTime.of(
+            2026, 9, 10, 9, 50, 0, 0,
+            ZoneId.of("Asia/Kolkata")
+    );
+
+    scheduler = new StandUpScheduler(
+            teamRepository,
+            standUpAutomationService,
+            notificationService,
+            slackMessageFormatter,
+            Clock.fixed(now.toInstant(), ZoneId.of("UTC"))
+    );
+
+    scheduler.pollTeams();
+    scheduler.pollTeams();
+
+    verify(notificationService, times(1))
+            .sendPersonalMessage("bot-token", "U1", "Reminder");
+}
 }

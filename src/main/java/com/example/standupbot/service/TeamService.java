@@ -51,6 +51,7 @@ public class TeamService {
         // These values are never returned in TeamResponse.
         team.setWebhookUrl(request.getWebhookUrl());
         team.setSlackBotToken(request.getSlackBotToken());
+        team.setSlackWorkspaceId(request.getSlackWorkspaceId());
 
         LocalDateTime now = LocalDateTime.now();
 

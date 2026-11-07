@@ -21,6 +21,7 @@ public class CreateTeamRequest {
 
     @NotBlank(message = "Slack bot token is required")
     private String slackBotToken;
+    private String slackWorkspaceId;
 
     public String getName() {
         return name;
@@ -60,5 +61,13 @@ public class CreateTeamRequest {
 
     public void setSlackBotToken(String slackBotToken) {
         this.slackBotToken = slackBotToken;
+    }
+
+    public String getSlackWorkspaceId() {
+        return slackWorkspaceId;
+    }
+    
+    public void setSlackWorkspaceId(String slackWorkspaceId) {
+        this.slackWorkspaceId = slackWorkspaceId;
     }
 }

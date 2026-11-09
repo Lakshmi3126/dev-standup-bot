@@ -125,4 +125,32 @@ class BotNotificationServiceTest {
 
         server.verify();
     }
+    @Test
+void shouldThrowWhenSlackReturnsServerError() {
+    RestClient.Builder builder = RestClient.builder();
+
+    MockRestServiceServer server =
+            MockRestServiceServer.bindTo(builder).build();
+
+    BotNotificationService service =
+            new BotNotificationService(builder);
+
+    server.expect(requestTo(SLACK_URL))
+            .andExpect(method(HttpMethod.POST))
+            .andRespond(
+                    org.springframework.test.web.client.response.MockRestResponseCreators
+                            .withServerError()
+            );
+
+    assertThrows(
+            SlackDeliveryException.class,
+            () -> service.send(
+                    "xoxb-test-token",
+                    "U12345",
+                    "Test message"
+            )
+    );
+
+    server.verify();
+}
 }

@@ -16,7 +16,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.example.standupbot.scheduler.StandUpScheduler;
 import java.time.LocalTime;
 import java.util.Optional;
-
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -34,7 +33,6 @@ class TeamServiceTest {
 
     @Mock
     private StandUpScheduler standupScheduler;
-
     @InjectMocks
     private TeamService teamService;
 
@@ -146,28 +144,9 @@ class TeamServiceTest {
         assertEquals("Asia/Kolkata", response.getTimezone());
         assertEquals(LocalTime.of(10, 0), response.getDeadline());
 
-        /*
-         * TeamResponse does not contain:
-         *
-         * webhookUrl
-         * slackBotToken
-         *
-         * Therefore these sensitive values cannot be
-         * returned through the API response.
-         */
-        assertFalse(
-                response.getClass()
-                        .getDeclaredFields()
-                        == null
-        );
-
-        assertNull(
-                findField(response, "webhookUrl")
-        );
-
-        assertNull(
-                findField(response, "slackBotToken")
-        );
+        // Sensitive fields must not exist in TeamResponse.
+        assertNull(findField(response, "webhookUrl"));
+        assertNull(findField(response, "slackBotToken"));
     }
 
     // =========================================================

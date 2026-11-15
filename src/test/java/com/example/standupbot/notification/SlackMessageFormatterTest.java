@@ -3,10 +3,34 @@ package com.example.standupbot.notification;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.example.standupbot.dto.DailyDigestData;
+import java.time.LocalDate;
+import java.util.List;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class SlackMessageFormatterTest {
+
+    @Test
+void dailyDigestShouldIncludeOnLeaveMembers() {
+
+    DailyDigestData digest = new DailyDigestData(
+            1L,
+            "Engineering",
+            LocalDate.of(2026, 9, 10),
+            List.of(),
+            List.of(),
+            List.of("Bob"),
+            List.of("Alice")
+    );
+
+    String message = formatter.formatDailyDigest(digest);
+
+    assertTrue(message.contains("On leave:"));
+    assertTrue(message.contains("Alice"));
+    assertTrue(message.contains("Bob"));
+}
 
     private SlackMessageFormatter formatter;
 

@@ -12,6 +12,7 @@ public class DailyDigestData {
     private LocalDate date;
 
     private List<MemberUpdate> onTimeSubmissions;
+    private List<String> onLeaveMembers;
 
     private List<MemberUpdate> lateSubmissions;
 
@@ -26,7 +27,8 @@ public class DailyDigestData {
             LocalDate date,
             List<MemberUpdate> onTimeSubmissions,
             List<MemberUpdate> lateSubmissions,
-            List<String> missingMembers) {
+            List<String> missingMembers,
+            List<String> onLeaveMembers) {
 
         this.teamId = teamId;
         this.teamName = teamName;
@@ -34,6 +36,10 @@ public class DailyDigestData {
         this.onTimeSubmissions = onTimeSubmissions;
         this.lateSubmissions = lateSubmissions;
         this.missingMembers = missingMembers;
+        this.onLeaveMembers = onLeaveMembers;
+    }
+    public List<String> getOnLeaveMembers() {
+        return onLeaveMembers;
     }
 
     public Long getTeamId() {

@@ -8,7 +8,7 @@ Person 1:
 Team & Member Management
 
 Person 2:
-Standup Management
+Standup Management & Leave Management
 
 Person 3:
 Scheduler & Automation
@@ -228,7 +228,7 @@ No contributor should independently create a competing implementation of a share
 
 ---
 
-# PERSON 2 — STANDUP MANAGEMENT
+# PERSON 2 — STANDUP MANAGEMENT & LEAVE MANAGEMENT
 
 ## Responsibilities
 
@@ -253,6 +253,24 @@ No contributor should independently create a competing implementation of a share
 - [ ] Today's standups endpoint
 - [ ] Filtering
 - [ ] Pagination if required
+### Leave Management
+
+- [ ] Create Leave entity
+- [ ] Create Leave repository
+- [ ] Create Leave service
+- [ ] Create Leave controller
+- [ ] Create Leave DTOs
+- [ ] Implement add leave API
+- [ ] Implement update leave API
+- [ ] Implement cancel leave API
+- [ ] Implement member leave history API
+- [ ] Validate member/team relationship
+- [ ] Validate leave date range
+- [ ] Prevent overlapping active leave periods
+- [ ] Retain cancelled leave records
+- [ ] Exclude members on leave from standup reminders
+- [ ] Include members on leave in daily digest
+
 
 ### Testing
 
@@ -439,7 +457,7 @@ Status: NOT STARTED
 
 ## Person 2
 
-Status: NOT STARTED
+Status: IN PROGRESS
 
 ## Person 3
 

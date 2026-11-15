@@ -184,8 +184,46 @@ The row is created in `PENDING` status *before* the Slack call is attempted, not
 **Why:** Without this, the scheduler can't distinguish "first digest for today" from "resend after late submission," risking either duplicate initial sends or a late submission that never triggers an update. See ARCHITECTURE.md §16a for the decision logic that uses this table.
 
 ---
+# 8. MEMBER_LEAVE
 
-# 8. Relationships
+Stores leave records for team members.
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| id | BIGINT | Primary key |
+| member_id | BIGINT | Foreign key to member |
+| start_date | DATE | First day of leave |
+| end_date | DATE | Last day of leave |
+| cancelled | BOOLEAN | Whether the leave has been cancelled |
+| created_at | TIMESTAMP | Record creation time |
+| updated_at | TIMESTAMP | Last update time |
+
+### Constraints
+
+- `member_id` references an existing member.
+- `end_date` must be greater than or equal to `start_date`.
+- Cancelled leave records are retained rather than deleted.
+- Active leave periods for the same member must not overlap (validated by the service layer).
+
+### Index
+
+`idx_member_leave_member_dates` on `(member_id, start_date, end_date)`.
+
+### Relationship
+
+One Member can have many Leave records.
+
+A leave record belongs to exactly one Member.
+
+### Leave Management Rules
+
+- Leave records are created, updated, and cancelled through the Leave Management API.
+- Team and member IDs must match the leave record's ownership.
+- Members on active leave are excluded from standup reminders and listed separately in daily digests.
+
+# 9. Relationships
 
 TEAM
   |
@@ -217,7 +255,7 @@ A Team has one DigestLog row per day.
 
 ---
 
-# 9. Important Constraints
+# 10. Important Constraints
 
 ## Member
 
@@ -244,7 +282,7 @@ One row per (team_id, digest_date). The scheduler creates the row on initial sen
 
 ---
 
-# 10. Standup Status
+# 11. Standup Status
 
 Allowed values:
 
@@ -261,7 +299,7 @@ team timezone
 
 ---
 
-# 11. Blocker Status
+# 12. Blocker Status
 
 Allowed values:
 
@@ -271,7 +309,7 @@ UNRESOLVED
 
 ---
 
-# 12. Indexing
+# 13. Indexing
 
 Indexes should be considered for frequently searched fields.
 
@@ -293,7 +331,7 @@ This will help daily standup queries and prevent duplicate digest_log rows.
 
 ---
 
-# 13. Database Rules
+# 14. Database Rules
 
 1. Use foreign keys.
 2. Do not duplicate team/member information unnecessarily.

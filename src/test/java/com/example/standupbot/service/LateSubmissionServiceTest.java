@@ -14,6 +14,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -95,6 +96,7 @@ class LateSubmissionServiceTest {
                         1L,
                         "Engineering",
                         date,
+                        List.of(),
                         List.of(),
                         List.of(),
                         List.of()

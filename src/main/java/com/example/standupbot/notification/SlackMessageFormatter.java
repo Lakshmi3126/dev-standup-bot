@@ -117,6 +117,23 @@ public class SlackMessageFormatter {
             }
         }
 
+        message.append("\nOn leave:\n");
+
+        if (digest.getOnLeaveMembers() == null
+                || digest.getOnLeaveMembers().isEmpty()) {
+
+                message.append(NONE).append("\n");
+
+        } else {
+
+                for (String memberName : digest.getOnLeaveMembers()) {
+
+                        message.append("- ")
+                        .append(display(memberName))
+                        .append("\n");
+                }
+        }
+
         return message.toString().trim();
     }
 

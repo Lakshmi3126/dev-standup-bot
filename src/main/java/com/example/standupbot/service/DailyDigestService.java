@@ -7,6 +7,7 @@ import com.example.standupbot.entity.Team;
 import com.example.standupbot.repository.MemberRepository;
 import com.example.standupbot.repository.StandupRepository;
 import org.springframework.stereotype.Service;
+import com.example.standupbot.entity.Leave;
 
 import java.time.LocalDate;
 import java.util.*;
@@ -18,13 +19,15 @@ public class DailyDigestService {
 
     private final MemberRepository memberRepository;
     private final StandupRepository standupRepository;
+    private final LeaveService leaveService;
 
     public DailyDigestService(
             MemberRepository memberRepository,
-            StandupRepository standupRepository) {
+            StandupRepository standupRepository, LeaveService leaveService) {
 
         this.memberRepository = memberRepository;
         this.standupRepository = standupRepository;
+        this.leaveService=leaveService;
     }
 
     public DailyDigestData buildDailyDigest(
@@ -92,11 +95,24 @@ public class DailyDigestService {
             }
         }
 
+        Set<Long> onLeaveMemberIds =
+        leaveService.getTeamLeaves(team.getId(), date)
+                .stream()
+                .map(leave -> leave.getMember().getId())
+                .collect(Collectors.toSet());
+
+        List<String> onLeave =
+                members.stream()
+                        .filter(member ->
+                                onLeaveMemberIds.contains(member.getId()))
+                        .map(Member::getName)
+                        .toList();
+
         List<String> missing =
                 members.stream()
                         .filter(member ->
-                                !submittedMemberIds.contains(
-                                        member.getId()))
+                                !submittedMemberIds.contains(member.getId())
+                        && !onLeaveMemberIds.contains(member.getId()))
                         .map(Member::getName)
                         .toList();
 
@@ -106,7 +122,8 @@ public class DailyDigestService {
                 date,
                 onTime,
                 late,
-                missing
+                missing,
+                onLeave
         );
     }
 

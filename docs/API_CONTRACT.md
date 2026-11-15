@@ -236,7 +236,66 @@ GET /api/teams/{teamId}/members/{memberId}/blockers
 
 ---
 
-# 8. ERROR RESPONSE
+# 8. LEAVE MANAGEMENT APIs
+
+Leave records are managed for individual team members.
+
+## Add Leave
+
+POST /api/teams/{teamId}/members/{memberId}/leaves
+
+Request:
+
+{
+  "startDate": "2026-11-20",
+  "endDate": "2026-11-22"
+}
+
+Response (201 CREATED):
+
+{
+  "id": 1,
+  "memberId": 1,
+  "startDate": "2026-11-20",
+  "endDate": "2026-11-22",
+  "cancelled": false
+}
+
+## Get Member Leave History
+
+GET /api/teams/{teamId}/members/{memberId}/leaves
+
+Returns the member's leave records, including cancelled records.
+
+## Update Leave
+
+PUT /api/teams/{teamId}/members/{memberId}/leaves/{leaveId}
+
+Request:
+
+{
+  "startDate": "2026-11-21",
+  "endDate": "2026-11-23"
+}
+
+Updates the dates of an existing active leave record.
+
+## Cancel Leave
+
+DELETE /api/teams/{teamId}/members/{memberId}/leaves/{leaveId}
+
+Cancels the leave record. The record is retained in the database with `cancelled = true`.
+
+### Leave API Rules
+
+- A member must belong to the team specified in the URL.
+- Start and end dates are required.
+- End date must not be earlier than start date.
+- Overlapping active leave periods for the same member are rejected.
+- Cancelled leave records cannot be updated or cancelled again.
+- Leave records are not physically deleted.
+
+# 9. ERROR RESPONSE
 
 Use a consistent structure.
 
@@ -252,7 +311,7 @@ Example:
 
 ---
 
-# 9. HTTP STATUS CODES
+# 10. HTTP STATUS CODES
 
 200 OK
 201 CREATED
@@ -264,7 +323,7 @@ Example:
 
 ---
 
-# 10. API RULES
+# 11. API RULES
 
 1. Do not change endpoint names without team discussion.
 2. Do not change request/response structures without updating this file.

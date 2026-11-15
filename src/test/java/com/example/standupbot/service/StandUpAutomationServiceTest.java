@@ -1,7 +1,11 @@
 
 package com.example.standupbot.service;
 
+import com.example.standupbot.entity.Leave;
+
+
 import com.example.standupbot.dto.DailyDigestData;
+import com.example.standupbot.service.LeaveService;
 import com.example.standupbot.entity.DigestLog;
 import com.example.standupbot.entity.DigestLogStatus;
 import com.example.standupbot.entity.Member;
@@ -24,6 +28,8 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -44,10 +50,15 @@ class StandUpAutomationServiceTest {
     @Mock
     private SlackMessageFormatter slackMessageFormatter;
 
+    @Mock
+    private LeaveService leaveService;
+
     private StandUpAutomationService service;
     private Team team;
-
-    @BeforeEach
+    
+    
+    
+        @BeforeEach
     void setUp() {
         service = new StandUpAutomationService(
                 memberRepository,
@@ -55,10 +66,12 @@ class StandUpAutomationServiceTest {
                 digestLogService,
                 notificationService,
                 slackMessageFormatter,
+                
                 Clock.fixed(
                         Instant.parse("2026-09-10T04:30:00Z"),
                         java.time.ZoneOffset.UTC
-                )
+                ),
+                leaveService
         );
 
         team = new Team();
@@ -98,6 +111,40 @@ class StandUpAutomationServiceTest {
         assertEquals(2L, result.get(0).getId());
         assertEquals("Bob", result.get(0).getName());
     }
+
+    @Test
+void findMissingMembers_shouldExcludeMembersOnLeave() {
+    Member alice = new Member();
+    alice.setId(1L);
+    alice.setName("Alice");
+
+    Member bob = new Member();
+    bob.setId(2L);
+    bob.setName("Bob");
+
+    Leave aliceLeave = new Leave();
+    aliceLeave.setMember(alice);
+
+    LocalDate date = LocalDate.of(2026, 9, 10);
+
+    when(memberRepository.findByTeamId(1L))
+            .thenReturn(List.of(alice, bob));
+
+    when(standupRepository
+            .findByTeamIdAndStandupDateOrderByStandupDateAsc(
+                    1L, date))
+            .thenReturn(List.of());
+
+    when(leaveService.getTeamLeaves(1L, date))
+            .thenReturn(List.of(aliceLeave));
+
+    List<Member> result =
+            service.findMissingMembers(team, date);
+
+    assertEquals(1, result.size());
+    assertEquals(2L, result.get(0).getId());
+    assertEquals("Bob", result.get(0).getName());
+}
 
     @Test
     void findMissingMembers_shouldReturnEmptyWhenEveryoneSubmitted() {
@@ -284,6 +331,7 @@ class StandUpAutomationServiceTest {
                 1L,
                 "Engineering",
                 date,
+                List.of(),
                 List.of(),
                 List.of(),
                 List.of(missingMembers)

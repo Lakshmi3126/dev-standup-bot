@@ -1,6 +1,7 @@
 
 package com.example.standupbot.service;
 
+import com.example.standupbot.entity.Leave;
 import com.example.standupbot.dto.DailyDigestData;
 import com.example.standupbot.entity.DigestLog;
 import com.example.standupbot.entity.DigestLogStatus;
@@ -22,6 +23,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+
 @Service
 public class StandUpAutomationService {
 
@@ -33,6 +35,7 @@ public class StandUpAutomationService {
     private final DigestLogService digestLogService;
     private final NotificationService notificationService;
     private final SlackMessageFormatter slackMessageFormatter;
+    private final LeaveService leaveService;
 
     public StandUpAutomationService(
             MemberRepository memberRepository,
@@ -40,7 +43,7 @@ public class StandUpAutomationService {
             DigestLogService digestLogService,
             NotificationService notificationService,
             SlackMessageFormatter slackMessageFormatter,
-            Clock clock) {
+            Clock clock, LeaveService leaveService) {
 
         this.clock = clock;
         this.memberRepository = memberRepository;
@@ -48,33 +51,46 @@ public class StandUpAutomationService {
         this.digestLogService = digestLogService;
         this.notificationService = notificationService;
         this.slackMessageFormatter = slackMessageFormatter;
+        this.leaveService = leaveService;
     }
 
     /**
      * Finds all team members who have not submitted today's standup.
      */
-    public List<Member> findMissingMembers(Team team, LocalDate today) {
+    
+/**
+ * Finds team members who have not submitted today's standup
+ * and are not on leave.
+ */
+public List<Member> findMissingMembers(Team team, LocalDate today) {
 
-        List<Member> members =
-                memberRepository.findByTeamId(team.getId());
+    List<Member> members =
+            memberRepository.findByTeamId(team.getId());
 
-        List<Standup> standups =
-                standupRepository
-                        .findByTeamIdAndStandupDateOrderByStandupDateAsc(
-                                team.getId(),
-                                today
-                        );
+    List<Standup> standups =
+            standupRepository
+                    .findByTeamIdAndStandupDateOrderByStandupDateAsc(
+                            team.getId(),
+                            today
+                    );
 
-        Set<Long> submittedMemberIds = standups.stream()
-                .filter(standup -> standup.getSubmittedAt() != null)
-                .map(Standup::getMemberId)
-                .collect(Collectors.toSet());
+    Set<Long> submittedMemberIds = standups.stream()
+            .filter(standup -> standup.getSubmittedAt() != null)
+            .map(Standup::getMemberId)
+            .collect(Collectors.toSet());
 
-        return members.stream()
-                .filter(member ->
-                        !submittedMemberIds.contains(member.getId()))
-                .toList();
-    }
+    Set<Long> leaveMemberIds =
+            leaveService.getTeamLeaves(team.getId(), today)
+                    .stream()
+                    .map(leave -> leave.getMember().getId())
+                    .collect(Collectors.toSet());
+
+    return members.stream()
+            .filter(member ->
+                    !submittedMemberIds.contains(member.getId())
+                    && !leaveMemberIds.contains(member.getId()))
+            .toList();
+}
 
     /**
      * Processes the team's daily deadline.

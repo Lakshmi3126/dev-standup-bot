@@ -1,5 +1,6 @@
 package com.example.standupbot.service;
 
+import com.example.standupbot.entity.Leave;
 import com.example.standupbot.dto.DailyDigestData;
 import com.example.standupbot.entity.DigestLog;
 import com.example.standupbot.entity.Team;
@@ -118,6 +119,7 @@ class DigestDebounceServiceTest {
                         date,
                         List.of(),
                         List.of(),
+                        List.of(),
                         List.of("Bob")
                 );
 
@@ -167,6 +169,7 @@ class DigestDebounceServiceTest {
                         1L,
                         "Engineering",
                         date,
+                        List.of(),
                         List.of(),
                         List.of(),
                         List.of()
